@@ -1,5 +1,6 @@
 import tkinter as tk
 import tkinter.ttk as ttk
+import tkinter.font as tkFont
 import subprocess
 import sys
 import datetime
@@ -9,7 +10,7 @@ import json
 import socket
 import requests
 import io
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -44,7 +45,7 @@ load_dotenv(dotenv_path=env_path)
 WEATHER_API_KEY = os.getenv("OWM_KEY")
 
 # Test-Ausgabe
-print("API Key:", WEATHER_API_KEY)
+# print("API Key:", WEATHER_API_KEY)
 
 player_process = None
 current_volume = 50
@@ -52,7 +53,6 @@ mpv_socket_path = "/tmp/mpv-socket"
 last_station_file = "/home/pi/webradio/last_station.txt"
 last_station_name = None
 active_control = None
-# WEATHER_API_KEY = os.getenv("OWM_KEY")
 WEATHER_LAT = "54.80797555"
 WEATHER_LON = "9.52438474"
 WEATHER_EXCL = "minutely,hourly,daily,alerts"
@@ -112,6 +112,7 @@ def update_datetime():
     root.after(10000, update_datetime)
 
 def update_weather():
+    """Aktualisiert Temperatur, Beschreibung und farbiges Icon von OpenWeather."""
     try:
         url = (
             f"https://api.openweathermap.org/data/3.0/onecall"
@@ -126,30 +127,64 @@ def update_weather():
         response = requests.get(url, timeout=5)
         data = response.json()
 
+        # Temperatur und Beschreibung
         temp = round(data["current"]["temp"])
         desc = data["current"]["weather"][0]["description"]
         icon_code = data["current"]["weather"][0]["icon"]
 
-        # ---- ICON LADEN ----
-        icon_url = f"https://openweathermap.org/img/wn/{icon_code}@2x.png"
+        # ---- WeatherIcons Unicode Mapping ----
+        icon_map = {
+            "01d": "\uf00d",  # Sonne
+            "01n": "\uf02e",  # Mond
+            "02d": "\uf002",  # Sonne/Wolke
+            "02n": "\uf086",  # Wolke/Nacht
+            "03d": "\uf041",  # bewölkt
+            "03n": "\uf041",
+            "04d": "\uf013",  # stark bewölkt
+            "04n": "\uf013",
+            "09d": "\uf019",  # Regen
+            "09n": "\uf019",
+            "10d": "\uf008",  # Regen/Sonne
+            "10n": "\uf036",  # Regen/Nacht
+            "11d": "\uf01e",  # Gewitter
+            "11n": "\uf01e",
+            "13d": "\uf01b",  # Schnee
+            "13n": "\uf01b",
+            "50d": "\uf014",  # Nebel
+            "50n": "\uf014",
+        }
 
-        icon_response = requests.get(icon_url, timeout=5)
-        img_data = icon_response.content
+        icon_char = icon_map.get(icon_code, "\uf07b")  # Default Wolke
+        # ---- Icon mit Pillow rendern ----
+        icon_size = 64  # Pixelgröße
+        extra_width = 20  # Breite extra, damit rechts nichts abgeschnitten wird
+        img = Image.new("RGBA", (icon_size + extra_width, icon_size + 10), (0, 0, 0, 0))  # Hintergrund transparent
+        draw = ImageDraw.Draw(img)
 
-        img = Image.open(io.BytesIO(img_data))
+        font_path = BASE_DIR + "/font/weathericons-regular-webfont.ttf"
+        font = ImageFont.truetype(font_path, icon_size)
+
+        # Icon mittig horizontal + vertikal
+        text_width, text_height = draw.textsize(icon_char, font=font)
+        x = ((icon_size + extra_width) - text_width) // 2
+        y = ((icon_size - 8) - text_height) // 2
+        draw.text((x, y), icon_char, font=font, fill="white")
+
         photo = ImageTk.PhotoImage(img)
-
         weather_icon_label.config(image=photo)
-        weather_icon_label.image = photo
+        weather_icon_label.image = photo  # Referenz halten
 
-        # ---- TEXT ----
+        # ---- Temperatur & Beschreibung ----
         weather_temp_var.set(f"{temp}°C")
         weather_desc_var.set(desc.capitalize())
 
-    except Exception:
-        weather_temp_var.set("Wetterdaten Fehler")
+    except Exception as e:
+        weather_temp_var.set("--°C")
+        weather_desc_var.set("Wetterdaten Fehler")
+        print("Weather update error:", e)
 
-    root.after(600000, update_weather)  # alle 10 Minuten
+    # alle 10 Minuten wiederholen
+    root.after(600000, update_weather)  # 600000 = alle 10 Minuten
 
 def play_station(name, url):
     global player_process, last_station_name
@@ -182,6 +217,7 @@ def play_station(name, url):
         time.sleep(0.1)
     save_last_station(name)
     highlight_active_station(name)
+    update_control_highlight()
 
 def highlight_active_station(active_name):
     for name, btn in buttons.items():
@@ -224,29 +260,14 @@ def update_now_playing():
 
     root.after(2000, update_now_playing)  # alle 2 Sekunden
 
-def highlight_control(button_name):
-    global active_control
-    active_control = button_name
-
-    # Rahmen setzen
-    if active_control == "play":
-        play_btn.config(highlightbackground="#22aa22", highlightthickness=5) # #22aa22=grün #FFC200=gelb
-        stop_btn.config(highlightbackground="#222", highlightthickness=1)
-    elif active_control == "stop":
-        stop_btn.config(highlightbackground="#22aa22", highlightthickness=5)
-        play_btn.config(highlightbackground="#222", highlightthickness=1)
-    else:
-        play_btn.config(highlightbackground="#222", highlightthickness=1)
-        stop_btn.config(highlightbackground="#222", highlightthickness=1)
-
 def play_last_station():
     if last_station_name and last_station_name in stations:
         play_station(last_station_name, stations[last_station_name]["url"])
-        highlight_control("play")
+        update_control_highlight()
 
 def stop_station():
     global player_process
-    highlight_control("stop")
+    update_control_highlight()
 
     # Socket löschen, bevor mpv beendet wird
     if os.path.exists(mpv_socket_path):
@@ -259,6 +280,23 @@ def stop_station():
     if player_process and player_process.poll() is None:
         player_process.terminate()
         player_process = None
+
+def create_png_circle_button(canvas, x, y, r, image, command):
+
+    circle = canvas.create_oval(
+        x-r, y-r, x+r, y+r,
+        outline=""
+    )
+
+    img_item = canvas.create_image(x, y, image=image)
+
+    canvas.tag_bind(circle, "<Button-1>", lambda e: command())
+    canvas.tag_bind(img_item, "<Button-1>", lambda e: command())
+
+    canvas.tag_bind(circle, "<Enter>", lambda e: canvas.itemconfig(circle))
+    canvas.tag_bind(circle, "<Leave>", lambda e: update_control_highlight())
+
+    return circle
 
 def vol_up():
     global current_volume
@@ -297,21 +335,7 @@ def toggle_mute():
     mpv.set_volume(current_volume)
     volume_var.set(current_volume)
     update_volume_style()
-    update_mute_button()
-
-def update_mute_button():
-    if muted:
-        mute_btn.config(
-            bg="#cc3333",          # rot = gemutet
-            relief="solid",
-            bd=2
-        )
-    else:
-        mute_btn.config(
-            bg="#f0f0f0",
-            relief="flat",
-            bd=0
-        )
+    update_control_highlight()
 
 def exit_app():
     stop_station()
@@ -332,15 +356,38 @@ def save_last_station(name):
     with open(last_station_file, "w") as f:
         f.write(name)
 
+# ------------------------------
+# Highlight / Zustand
+# ------------------------------
+def update_control_highlight():
+    """Aktive Zustände visuell darstellen"""
+    normal = "#3a3a3a"
+    active_green = "#22aa22"
+    active_red = "#cc3333"
+    
+    # Standardfarben setzen
+    for btn in [stop_circle, play_circle, mute_circle, vol_down_circle, vol_up_circle]:
+        control_canvas.itemconfig(btn, fill=normal)
+    
+    # Play / Stop
+    if player_process and player_process.poll() is None:
+        control_canvas.itemconfig(play_circle, fill=active_green)
+    else:
+        control_canvas.itemconfig(stop_circle, fill=active_red)
+    
+    # Mute
+    if muted:
+        control_canvas.itemconfig(mute_circle, fill=active_red)
+
 # ----- GUI -----
 root = tk.Tk()
 style = ttk.Style()
 style.theme_use("default")
 
-# Standardhöhe (Fallback)
+# Standardhöhe Lautstärke-Bar (Fallback)
 style.configure(
     "TProgressbar",
-    thickness=18
+    thickness=10
 )
 
 # Leise
@@ -351,7 +398,6 @@ style.configure(
     lightcolor="#666",
     darkcolor="#666",
     bordercolor="#000",
-    thickness=18
 )
 
 # Mittel
@@ -362,7 +408,6 @@ style.configure(
     lightcolor="#22aa22",
     darkcolor="#22aa22",
     bordercolor="#000",
-    thickness=18
 )
 
 # Laut
@@ -373,7 +418,6 @@ style.configure(
     lightcolor="#cc3333",
     darkcolor="#cc3333",
     bordercolor="#000",
-    thickness=18
 )
 
 root.attributes("-fullscreen", True)
@@ -410,40 +454,50 @@ datetime_label = tk.Label(header, textvariable=datetime_var,
                           bg="#111", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
 
-last = load_last_station()
-if last:
-    last_station_name = last
+# ----- Wetteranzeige als "Langloch" -----
+weather_canvas = tk.Canvas(root, width=350, height=80, bg="#222222", highlightthickness=0)
+weather_canvas.pack(pady=15)
 
-# Label für Wetter
-weather_frame = tk.Frame(root, bg="#222")
-weather_frame.pack(pady=10)
+# Hellgrauer Langloch-Hintergrund (#333) mit abgerundeten Enden
+radius = 40  # Radius der Halbkreise
+width = 350
+height = 80
+weather_canvas.create_rectangle(radius, 0, width - radius, height, fill="#333333", outline="")  # Mittelteil
+weather_canvas.create_oval(0, 0, radius*2, height, fill="#333333", outline="")             # linke Halbrundung
+weather_canvas.create_oval(width - radius*2, 0, width, height, fill="#333333", outline="") # rechte Halbrundung
 
-weather_icon_label = tk.Label(weather_frame, bg="#222")
-weather_icon_label.pack(side="left", padx=15)
+# Innerer Frame für Icon + Text
+weather_inner = tk.Frame(weather_canvas, bg="#333333")
+weather_canvas.create_window(width//2, height//2, window=weather_inner)  # mittig im Canvas
 
-weather_text_frame = tk.Frame(weather_frame, bg="#222")
-weather_text_frame.pack(side="left")
+# ---- Icon links ----
+weather_icon_label = tk.Label(weather_inner, bg="#333333")
+weather_icon_label.pack(side="left", padx=(0,15), pady=5)
 
+# ---- Text rechts ----
+weather_text_frame = tk.Frame(weather_inner, bg="#333333")
+weather_text_frame.pack(side="left", anchor="center")
+
+# Temperatur
 weather_temp_var = tk.StringVar()
 weather_temp_var.set("--°C")
-
-weather_desc_var = tk.StringVar()
-weather_desc_var.set("")
-
 weather_temp_label = tk.Label(
     weather_text_frame,
     textvariable=weather_temp_var,
-    font=("Arial", 26, "bold"),   # <<< GROSS
-    bg="#222",
+    font=("Arial", 24, "bold"),
+    bg="#333333",
     fg="white"
 )
 weather_temp_label.pack(anchor="w")
 
+# Beschreibung
+weather_desc_var = tk.StringVar()
+weather_desc_var.set("")
 weather_desc_label = tk.Label(
     weather_text_frame,
     textvariable=weather_desc_var,
-    font=("Arial", 11),           # <<< KLEINER
-    bg="#222",
+    font=("Arial", 12),
+    bg="#333333",
     fg="#bbbbbb"
 )
 weather_desc_label.pack(anchor="w")
@@ -498,95 +552,102 @@ now_playing_label = tk.Label(
 )
 now_playing_label.pack(pady=5)
 
-# STOP + EXIT
-control_frame = tk.Frame(root, bg="#222")
-control_frame.pack(pady=10)
-
-stop_btn = tk.Button(
-    control_frame,
-    image=root.stop_icon,
-    command=stop_station,
-    bd=0,
-    bg="#f0f0f0",
-    activebackground="#a0a0a0"
+control_canvas = tk.Canvas(
+    root,
+    width=800,
+    height=170,
+    bg="#222222",
+    highlightthickness=0
 )
-stop_btn.pack(side="left", padx=15)
+control_canvas.pack(pady=0)
 
-play_btn = tk.Button(
-    control_frame,
-    image=root.play_icon,
-    command=play_last_station,
-    bd=0,
-    bg="#f0f0f0",
-    activebackground="#a0a0a0"
+# Radius für Haupt-Buttons und Side-Buttons
+BUTTON_MAIN = 28
+BUTTON_SIDE = 22
+
+# Y-Position aller Buttons
+BUTTON_Y = 60
+
+# Funktion zum Erstellen von Kreis-Buttons mit Bild
+def create_circle_button(canvas, x, y, r, image, command):
+    circle = canvas.create_oval(x-r, y-r, x+r, y+r, fill="#3a3a3a", outline="")
+    img_item = canvas.create_image(x, y, image=image)
+    
+    # Klick
+    canvas.tag_bind(circle, "<Button-1>", lambda e: command())
+    canvas.tag_bind(img_item, "<Button-1>", lambda e: command())
+    
+    # Hover
+    def on_enter(e):
+        canvas.itemconfig(circle, fill="#5a5a5a")
+    def on_leave(e):
+        update_control_highlight()
+
+    canvas.tag_bind(circle, "<Enter>", lambda e: None)
+    canvas.tag_bind(circle, "<Leave>", lambda e: update_control_highlight())
+    
+    return circle
+
+# ------------------------------
+# Buttons erzeugen
+# ------------------------------
+
+# Stop / Play / Exit
+stop_circle = create_circle_button(control_canvas, 90, BUTTON_Y, BUTTON_MAIN, root.stop_icon, stop_station)
+play_circle = create_circle_button(control_canvas, 160, BUTTON_Y, BUTTON_MAIN, root.play_icon, play_last_station)
+exit_circle = create_circle_button(control_canvas, 230, BUTTON_Y, BUTTON_MAIN, root.exit_icon, exit_app)
+
+# Mute
+mute_circle = create_circle_button(control_canvas, 380, BUTTON_Y, BUTTON_SIDE, root.mute_icon, toggle_mute)
+
+# Volume Down / Up
+vol_down_circle = create_circle_button(control_canvas, 450, BUTTON_Y, BUTTON_SIDE, root.volume_down_icon, vol_down)
+vol_up_circle   = create_circle_button(control_canvas, 650, BUTTON_Y, BUTTON_SIDE, root.volume_up_icon, vol_up)
+
+# ------------------------------
+# Volume-Bar Slot
+# ------------------------------
+volume_slot_x = 550
+volume_slot_y = BUTTON_Y
+volume_slot_width = 140
+volume_slot_height = 24
+
+# Hintergrundrechteck für die Leiste
+control_canvas.create_rectangle(
+    volume_slot_x - volume_slot_width/2,
+    volume_slot_y - volume_slot_height/2,
+    volume_slot_x + volume_slot_width/2,
+    volume_slot_y + volume_slot_height/2,
+    fill="#3a3a3a",
+    outline=""
 )
-play_btn.pack(side="left", padx=15)
 
-exit_btn = tk.Button(
-    control_frame,
-    image=root.exit_icon,
-    command=exit_app,
-    bd=0,
-    bg="#f0f0f0",
-    activebackground="#a0a0a0"
-)
-exit_btn.pack(side="left", padx=15)
-
-# ----- Abstand nach Exit -----
-spacer = tk.Frame(control_frame, width=40, bg="#222")
-spacer.pack(side="left")
-
-# Lautstärke
+# Progressbar
 volume_var = tk.IntVar(value=current_volume)
-
-mute_btn = tk.Button(
-    control_frame,
-    image=root.mute_icon,
-    command=toggle_mute,
-    bd=0,
-    bg="#f0f0f0",
-    activebackground="#a0a0a0"
-)
-mute_btn.pack(side="left", padx=(25))
-
-vol_down_btn = tk.Button(
-    control_frame,
-    image=root.volume_down_icon,
-    command=vol_down,
-    bd=0,
-    bg="#f0f0f0",
-    activebackground="#a0a0a0"
-    )
-vol_down_btn.pack(side="left", padx=5)
-
 volume_bar = ttk.Progressbar(
-    control_frame,
+    control_canvas,
     orient="horizontal",
-    length=180,          # Breite des Balkens
+    length=volume_slot_width-10,
     mode="determinate",
     maximum=100,
     variable=volume_var
 )
-volume_bar.pack(side="left", padx=5)
+control_canvas.create_window(volume_slot_x, volume_slot_y, window=volume_bar)
 update_volume_style()
 
-vol_up_btn = tk.Button(
-    control_frame,
-    image=root.volume_up_icon,
-    command=vol_up,
-    bd=0,
-    bg="#f0f0f0",
-    activebackground="#a0a0a0"
-    )
-vol_up_btn.pack(side="left", padx=5)
+# ------------------------------
+# Direkt initial Highlight aktualisieren
+# ------------------------------
+update_control_highlight()
 
-# ----- Start zuletzt gespielter Sender und Button-Highlight -----
-if last_station_name:
-    highlight_active_station(last_station_name)  # grüner Rahmen um Sender
-    highlight_control("play")                    # Play-Button grün umrahmen
-    play_last_station()                           # Stream starten
+last = load_last_station()
+if last:
+    last_station_name = last
+    play_last_station()           # mpv-Stream starten
+    highlight_active_station(last_station_name)  # Button grün markieren
+    update_control_highlight()    # Play-Button grün setzen
 else:
-    highlight_control("stop")                    # Stop-Button grün umrahmen, falls keine letzte Station
+    update_control_highlight()    # Stop grün, falls keine Station
 
 # sofort starten
 update_datetime()
