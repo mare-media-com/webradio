@@ -111,6 +111,14 @@ def update_datetime():
     # Alle 10 Sekunden erneut aufrufen
     root.after(10000, update_datetime)
 
+def ms_to_bft(speed_ms):
+    """m/s → Beaufort"""
+    scale = [0.3,1.5,3.3,5.5,7.9,10.7,13.8,17.1,20.7,24.4,28.4,32.6]
+    for i, val in enumerate(scale):
+        if speed_ms <= val:
+            return i
+    return 12
+
 def update_weather():
     """Aktualisiert Temperatur, Beschreibung und farbiges Icon von OpenWeather."""
     try:
@@ -127,10 +135,32 @@ def update_weather():
         response = requests.get(url, timeout=5)
         data = response.json()
 
-        # Temperatur und Beschreibung
+        # Temperatur, Beschreibung, Icon
         temp = round(data["current"]["temp"])
         desc = data["current"]["weather"][0]["description"]
         icon_code = data["current"]["weather"][0]["icon"]
+
+        # Wind
+        wind_deg = data["current"]["wind_deg"]
+        wind_speed = data["current"]["wind_speed"]
+        # Beaufort berechnen
+        if wind_speed < 0.3: bft = 0
+        elif wind_speed < 1.6: bft = 1
+        elif wind_speed < 3.4: bft = 2
+        elif wind_speed < 5.5: bft = 3
+        elif wind_speed < 8.0: bft = 4
+        elif wind_speed < 10.8: bft = 5
+        elif wind_speed < 13.9: bft = 6
+        elif wind_speed < 17.2: bft = 7
+        elif wind_speed < 20.8: bft = 8
+        elif wind_speed < 24.5: bft = 9
+        elif wind_speed < 28.5: bft = 10
+        elif wind_speed < 32.7: bft = 11
+        else: bft = 12
+
+        # Druck & Luftfeuchtigkeit
+        pressure = data["current"]["pressure"]
+        humidity = data["current"]["humidity"]
 
         # ---- WeatherIcons Unicode Mapping ----
         icon_map = {
@@ -153,34 +183,81 @@ def update_weather():
             "50d": "\uf014",  # Nebel
             "50n": "\uf014",
         }
-
         icon_char = icon_map.get(icon_code, "\uf07b")  # Default Wolke
-        # ---- Icon mit Pillow rendern ----
-        icon_size = 64  # Pixelgröße
-        extra_width = 20  # Breite extra, damit rechts nichts abgeschnitten wird
-        img = Image.new("RGBA", (icon_size + extra_width, icon_size + 10), (0, 0, 0, 0))  # Hintergrund transparent
-        draw = ImageDraw.Draw(img)
 
+        # --- Icon rendern ---
+        img = Image.new("RGBA", (icon_size + extra_width, icon_size + 10), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
         font_path = BASE_DIR + "/font/weathericons-regular-webfont.ttf"
         font = ImageFont.truetype(font_path, icon_size)
 
-        # Icon mittig horizontal + vertikal
-        text_width, text_height = draw.textsize(icon_char, font=font)
+        # Text bbox verwenden
+        bbox = draw.textbbox((0, 0), icon_char, font=font)
+        text_width  = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
         x = ((icon_size + extra_width) - text_width) // 2
-        y = ((icon_size - 8) - text_height) // 2
+        y = ((icon_size - text_height) // 2) - bbox[1] + 3  # leicht nach unten verschieben
         draw.text((x, y), icon_char, font=font, fill="white")
 
         photo = ImageTk.PhotoImage(img)
         weather_icon_label.config(image=photo)
         weather_icon_label.image = photo  # Referenz halten
 
-        # ---- Temperatur & Beschreibung ----
+        # --- Variablen aktualisieren ---
         weather_temp_var.set(f"{temp}°C")
+        # Windrose rotieren
+        angle = (wind_deg + 180) % 360  # +180° für Richtung, %360 für Kreis  # OpenWeather liefert Grad 0-360, 0=Norden
+        rotated_img = wind_rose_base_img.rotate(-angle, resample=Image.BICUBIC, expand=True)
+
+        # In PhotoImage umwandeln für Tkinter
+        wind_photo = ImageTk.PhotoImage(rotated_img)
+        weather_wind_label.config(image=wind_photo)
+        weather_wind_label.image = wind_photo  # Referenz halten
+
+        # Beaufort-Wert daneben aktualisieren
+        bft_label.config(text=f"{bft} bft")
+
         weather_desc_var.set(desc.capitalize())
+        pressure_label_text.config(text=f"{pressure} hPa")
+        humidity_label_text.config(text=f"{humidity}%")
+
+        # --- Canvas-Breite anpassen ---
+        root.update_idletasks()
+
+        text_width = weather_text_frame.winfo_reqwidth()
+
+        langloch_width = icon_size + extra_width + text_width + padding + (radius * 2)
+
+        # Canvas Breite ändern
+        weather_canvas.config(width=langloch_width)
+
+        # ✅ Hintergrund GEOMETRISCH korrekt verschieben
+        weather_canvas.coords(weather_bg_rect,
+            radius, 0,
+            langloch_width - radius, langloch_height
+        )
+
+        weather_canvas.coords(weather_bg_left,
+            0, 0,
+            radius * 2, langloch_height
+        )
+
+        weather_canvas.coords(weather_bg_right,
+            langloch_width - radius * 2, 0,
+            langloch_width, langloch_height
+        )
+
+        # Content mittig halten
+        weather_canvas.coords(weather_window,
+            langloch_width // 2,
+            langloch_height // 2
+        )
 
     except Exception as e:
         weather_temp_var.set("--°C")
         weather_desc_var.set("Wetterdaten Fehler")
+        # weather_wind_var.set("")
+        # weather_details_var.set("")
         print("Weather update error:", e)
 
     # alle 10 Minuten wiederholen
@@ -267,7 +344,6 @@ def play_last_station():
 
 def stop_station():
     global player_process
-    update_control_highlight()
 
     # Socket löschen, bevor mpv beendet wird
     if os.path.exists(mpv_socket_path):
@@ -280,6 +356,8 @@ def stop_station():
     if player_process and player_process.poll() is None:
         player_process.terminate()
         player_process = None
+
+    update_control_highlight()
 
 def create_png_circle_button(canvas, x, y, r, image, command):
 
@@ -361,12 +439,20 @@ def save_last_station(name):
 # ------------------------------
 def update_control_highlight():
     """Aktive Zustände visuell darstellen"""
-    normal = "#3a3a3a"
+    normal = "#666666"
     active_green = "#22aa22"
     active_red = "#cc3333"
     
     # Standardfarben setzen
-    for btn in [stop_circle, play_circle, mute_circle, vol_down_circle, vol_up_circle]:
+    control_buttons = [
+        stop_circle,
+        play_circle,
+        exit_circle,
+        mute_circle,
+        vol_down_circle,
+        vol_up_circle
+    ]
+    for btn in control_buttons:
         control_canvas.itemconfig(btn, fill=normal)
     
     # Play / Stop
@@ -429,6 +515,11 @@ exit_icon = load_icon("exit.png")
 volume_down_icon = load_icon("volume_down.png", (32, 32))
 volume_up_icon = load_icon("volume_up.png", (32, 32))
 mute_icon = load_icon("mute.png", (32, 32))
+pressure_icon_img = load_icon("pressure.png", size=(20, 20))
+humidity_icon_img = load_icon("humidity.png", size=(20, 20))
+wind_rose_base_img = Image.open(os.path.join(BASE_DIR, "img", "wind_rose.png")).convert("RGBA")
+wind_rose_base_img = wind_rose_base_img.resize((20,20), Image.LANCZOS)
+wind_rose_photo = ImageTk.PhotoImage(wind_rose_base_img)
 
 root.play_icon = play_icon
 root.stop_icon = stop_icon
@@ -438,10 +529,10 @@ root.volume_up_icon = volume_up_icon
 root.mute_icon = mute_icon
 
 # Header
-header = tk.Frame(root, bg="#111", height=40)
+header = tk.Frame(root, bg="#222222", height=40)
 header.pack(fill="x")
 title_label = tk.Label(header, text="Webradio", font=("Arial", 16, "bold"),
-                       bg="#111", fg="white")
+                       bg="#222222", fg="white")
 title_label.pack(side="left", padx=10)
 
 # Variable für Datum/Uhrzeit
@@ -451,56 +542,121 @@ datetime_var.set("")  # wird gleich aktualisiert
 # Label für Datum/Uhrzeit (oben rechts)
 datetime_label = tk.Label(header, textvariable=datetime_var,
                           font=("Arial", 12),  # normale Schrift für Datum/Uhrzeit
-                          bg="#111", fg="#bbbbbb")
+                          bg="#222222", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
 
 # ----- Wetteranzeige als "Langloch" -----
-weather_canvas = tk.Canvas(root, width=350, height=80, bg="#222222", highlightthickness=0)
+langloch_height = 80
+radius = langloch_height // 2
+
+icon_size = 64
+extra_width = 20
+padding = 30
+
+initial_width = 400  # bewusst etwas größer wählen
+
+weather_canvas = tk.Canvas(
+    root,
+    width=initial_width,
+    height=langloch_height,
+    bg="#222222",
+    highlightthickness=0
+)
 weather_canvas.pack(pady=15)
 
-# Hellgrauer Langloch-Hintergrund (#333) mit abgerundeten Enden
-radius = 40  # Radius der Halbkreise
-width = 350
-height = 80
-weather_canvas.create_rectangle(radius, 0, width - radius, height, fill="#333333", outline="")  # Mittelteil
-weather_canvas.create_oval(0, 0, radius*2, height, fill="#333333", outline="")             # linke Halbrundung
-weather_canvas.create_oval(width - radius*2, 0, width, height, fill="#333333", outline="") # rechte Halbrundung
+# ✅ Langloch-Hintergrund speichern (WICHTIG!)
+weather_bg_rect = weather_canvas.create_rectangle(
+    radius, 0,
+    initial_width - radius, langloch_height,
+    fill="#333333",
+    outline=""
+)
 
-# Innerer Frame für Icon + Text
+weather_bg_left = weather_canvas.create_oval(
+    0, 0,
+    radius * 2, langloch_height,
+    fill="#333333",
+    outline=""
+)
+
+weather_bg_right = weather_canvas.create_oval(
+    initial_width - radius * 2, 0,
+    initial_width, langloch_height,
+    fill="#333333",
+    outline=""
+)
+
+# Innerer Frame
 weather_inner = tk.Frame(weather_canvas, bg="#333333")
-weather_canvas.create_window(width//2, height//2, window=weather_inner)  # mittig im Canvas
+
+weather_window = weather_canvas.create_window(
+    initial_width // 2,
+    langloch_height // 2,
+    window=weather_inner
+)
 
 # ---- Icon links ----
 weather_icon_label = tk.Label(weather_inner, bg="#333333")
-weather_icon_label.pack(side="left", padx=(0,15), pady=5)
+weather_icon_label.pack(side="left", padx=(10,15), pady=5)
 
-# ---- Text rechts ----
+# ---- Textbereich ----
 weather_text_frame = tk.Frame(weather_inner, bg="#333333")
-weather_text_frame.pack(side="left", anchor="center")
+weather_text_frame.pack(side="left")
 
-# Temperatur
+# Obere Zeile
+top_row_frame = tk.Frame(weather_text_frame, bg="#333333")
+top_row_frame.pack(anchor="w")
+
 weather_temp_var = tk.StringVar()
-weather_temp_var.set("--°C")
 weather_temp_label = tk.Label(
-    weather_text_frame,
+    top_row_frame,
     textvariable=weather_temp_var,
     font=("Arial", 24, "bold"),
     bg="#333333",
     fg="white"
 )
-weather_temp_label.pack(anchor="w")
+weather_temp_label.pack(side="left")
 
-# Beschreibung
+# Neues Label für Wind mit Icon
+weather_wind_label = tk.Label(top_row_frame, bg="#333333")
+weather_wind_label.pack(side="left", padx=(15,0))
+bft_label = tk.Label(top_row_frame, text="0 bft",  # Platzhalter
+                     font=("Arial", 24, "bold"), bg="#333333", fg="white")
+bft_label.pack(side="left", padx=(5,0))
+
+# Untere Zeile
+bottom_row_frame = tk.Frame(weather_text_frame, bg="#333333")
+bottom_row_frame.pack(anchor="w")
+
 weather_desc_var = tk.StringVar()
-weather_desc_var.set("")
 weather_desc_label = tk.Label(
-    weather_text_frame,
+    bottom_row_frame,
     textvariable=weather_desc_var,
     font=("Arial", 12),
     bg="#333333",
     fg="#bbbbbb"
 )
-weather_desc_label.pack(anchor="w")
+weather_desc_label.pack(side="left")
+
+# --- Neuer Frame für Pressure & Humidity ---
+weather_details_frame = tk.Frame(bottom_row_frame, bg="#333333")
+weather_details_frame.pack(side="left", padx=(15,0))
+
+# Pressure
+pressure_label_icon = tk.Label(weather_details_frame, image=pressure_icon_img, bg="#333333")
+pressure_label_icon.pack(side="left")
+
+pressure_label_text = tk.Label(weather_details_frame, text="0 hPa",
+                               font=("Arial", 12), bg="#333333", fg="#bbbbbb")
+pressure_label_text.pack(side="left", padx=(3,10))
+
+# Humidity
+humidity_label_icon = tk.Label(weather_details_frame, image=humidity_icon_img, bg="#333333")
+humidity_label_icon.pack(side="left")
+
+humidity_label_text = tk.Label(weather_details_frame, text="0%",
+                               font=("Arial", 12), bg="#333333", fg="#bbbbbb")
+humidity_label_text.pack(side="left", padx=(3,0))
 
 # Sender-Buttons
 button_frame = tk.Frame(root, bg="#222")
@@ -562,7 +718,7 @@ control_canvas = tk.Canvas(
 control_canvas.pack(pady=0)
 
 # Radius für Haupt-Buttons und Side-Buttons
-BUTTON_MAIN = 28
+BUTTON_MAIN = 30
 BUTTON_SIDE = 22
 
 # Y-Position aller Buttons
@@ -594,8 +750,8 @@ def create_circle_button(canvas, x, y, r, image, command):
 
 # Stop / Play / Exit
 stop_circle = create_circle_button(control_canvas, 90, BUTTON_Y, BUTTON_MAIN, root.stop_icon, stop_station)
-play_circle = create_circle_button(control_canvas, 160, BUTTON_Y, BUTTON_MAIN, root.play_icon, play_last_station)
-exit_circle = create_circle_button(control_canvas, 230, BUTTON_Y, BUTTON_MAIN, root.exit_icon, exit_app)
+play_circle = create_circle_button(control_canvas, 170, BUTTON_Y, BUTTON_MAIN, root.play_icon, play_last_station)
+exit_circle = create_circle_button(control_canvas, 250, BUTTON_Y, BUTTON_MAIN, root.exit_icon, exit_app)
 
 # Mute
 mute_circle = create_circle_button(control_canvas, 380, BUTTON_Y, BUTTON_SIDE, root.mute_icon, toggle_mute)
