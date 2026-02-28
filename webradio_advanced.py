@@ -31,7 +31,7 @@ stations = {
         "url": "https://streams.rsh.de/rsh-live/mp3-128/streams.rsh.de/",
         "logo": "img/rsh.png"
     },
-    "Ibiza Global": {
+    "Ibiza Global Radio": {
         "url": "http://ibizaglobalradio.streaming-pro.com:8024/listen.pls?sid=1",
         "logo": "img/ibizaglobalradio.png"
     }
@@ -52,12 +52,13 @@ current_volume = 50
 mpv_socket_path = "/tmp/mpv-socket"
 last_station_file = "/home/pi/webradio/last_station.txt"
 last_station_name = None
+current_station_name = ""
 active_control = None
+muted = False
+last_volume_before_mute = current_volume
 WEATHER_LAT = "54.80797555"
 WEATHER_LON = "9.52438474"
 WEATHER_EXCL = "minutely,hourly,daily,alerts"
-muted = False
-last_volume_before_mute = current_volume
 
 load_dotenv()
 
@@ -140,6 +141,15 @@ def update_weather():
         desc = data["current"]["weather"][0]["description"]
         icon_code = data["current"]["weather"][0]["icon"]
 
+        # --- PNG Icon setzen ---
+        icon_photo = weather_icon_images.get(icon_code)
+
+        if icon_photo:
+            weather_icon_label.config(image=icon_photo)
+            weather_icon_label.image = icon_photo
+        else:
+            weather_icon_label.config(image="")
+
         # Wind
         wind_deg = data["current"]["wind_deg"]
         wind_speed = data["current"]["wind_speed"]
@@ -161,47 +171,6 @@ def update_weather():
         # Druck & Luftfeuchtigkeit
         pressure = data["current"]["pressure"]
         humidity = data["current"]["humidity"]
-
-        # ---- WeatherIcons Unicode Mapping ----
-        icon_map = {
-            "01d": "\uf00d",  # Sonne
-            "01n": "\uf02e",  # Mond
-            "02d": "\uf002",  # Sonne/Wolke
-            "02n": "\uf086",  # Wolke/Nacht
-            "03d": "\uf041",  # bewölkt
-            "03n": "\uf041",
-            "04d": "\uf013",  # stark bewölkt
-            "04n": "\uf013",
-            "09d": "\uf019",  # Regen
-            "09n": "\uf019",
-            "10d": "\uf008",  # Regen/Sonne
-            "10n": "\uf036",  # Regen/Nacht
-            "11d": "\uf01e",  # Gewitter
-            "11n": "\uf01e",
-            "13d": "\uf01b",  # Schnee
-            "13n": "\uf01b",
-            "50d": "\uf014",  # Nebel
-            "50n": "\uf014",
-        }
-        icon_char = icon_map.get(icon_code, "\uf07b")  # Default Wolke
-
-        # --- Icon rendern ---
-        img = Image.new("RGBA", (icon_size + extra_width, icon_size + 10), (0,0,0,0))
-        draw = ImageDraw.Draw(img)
-        font_path = BASE_DIR + "/font/weathericons-regular-webfont.ttf"
-        font = ImageFont.truetype(font_path, icon_size)
-
-        # Text bbox verwenden
-        bbox = draw.textbbox((0, 0), icon_char, font=font)
-        text_width  = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        x = ((icon_size + extra_width) - text_width) // 2
-        y = ((icon_size - text_height) // 2) - bbox[1] + 3  # leicht nach unten verschieben
-        draw.text((x, y), icon_char, font=font, fill="white")
-
-        photo = ImageTk.PhotoImage(img)
-        weather_icon_label.config(image=photo)
-        weather_icon_label.image = photo  # Referenz halten
 
         # --- Variablen aktualisieren ---
         weather_temp_var.set(f"{temp}°C")
@@ -264,8 +233,10 @@ def update_weather():
     root.after(600000, update_weather)  # 600000 = alle 10 Minuten
 
 def play_station(name, url):
-    global player_process, last_station_name
+    global player_process, last_station_name, current_station_name
     last_station_name = name
+    current_station_name = name
+    now_playing_var.set(f"Jetzt läuft: {current_station_name}")
     stop_station()
     
     # Klinkenausgang aktivieren
@@ -304,14 +275,21 @@ def highlight_active_station(active_name):
             btn.config(highlightbackground="#222", highlightthickness=1)       # neutral
 
 def update_now_playing():
-    """Liest den aktuellen ICY Titel aus mpv."""
-    
+    """Liest den aktuellen ICY-Titel aus mpv und zeigt den Sendernamen, falls kein sinnvoller Titel verfügbar ist."""
+    global current_station_name
+
+    # Standardtext: Sendername
+    display_text = f"Jetzt läuft: {current_station_name}"
+
+    # Prüfen, ob mpv läuft
     if player_process is None or player_process.poll() is not None:
-        now_playing_var.set("Now Playing: ---")
+        now_playing_var.set(display_text)
         root.after(2000, update_now_playing)
         return
 
+    # Prüfen, ob Socket existiert
     if not os.path.exists(mpv_socket_path):
+        now_playing_var.set(display_text)
         root.after(2000, update_now_playing)
         return
 
@@ -323,19 +301,29 @@ def update_now_playing():
             s.send((json.dumps(command) + "\n").encode())
 
             response = s.recv(4096).decode(errors="ignore")
-
             data = json.loads(response)
             title = data.get("data")
 
+            # Nur anzeigen, wenn ein sinnvoller ICY-Titel vorliegt
             if title:
-                now_playing_var.set(f"Es läuft gerade: 🎵 {title}")
-            else:
-                now_playing_var.set("Es läuft gerade: ---")
+                title_clean = title.strip()
+                if (
+                    len(title_clean) > 3
+                    and not title_clean.lower().startswith("http")
+                    and ".pls" not in title_clean.lower()
+                ):
+                    display_text = f"Jetzt läuft: 🎵 {title_clean}"
 
     except Exception:
+        # Im Fehlerfall einfach den Sendernamen anzeigen
         pass
 
-    root.after(2000, update_now_playing)  # alle 2 Sekunden
+    # Nur aktualisieren, wenn sich etwas geändert hat
+    if now_playing_var.get() != display_text:
+        now_playing_var.set(display_text)
+
+    # alle 2 Sekunden erneut prüfen
+    root.after(2000, update_now_playing)
 
 def play_last_station():
     if last_station_name and last_station_name in stations:
@@ -528,6 +516,20 @@ root.volume_down_icon = volume_down_icon
 root.volume_up_icon = volume_up_icon
 root.mute_icon = mute_icon
 
+# === Wetter-Icons (PNG) laden ===
+icon_size = 64
+weather_icon_images = {}
+
+icon_folder = os.path.join(BASE_DIR, "img", "weather_icons")
+
+for filename in os.listdir(icon_folder):
+    if filename.endswith(".png"):
+        code = filename.replace(".png", "")
+        path = os.path.join(icon_folder, filename)
+
+        img = Image.open(path).resize((icon_size, icon_size), Image.LANCZOS)
+        weather_icon_images[code] = ImageTk.PhotoImage(img)
+
 # Header
 header = tk.Frame(root, bg="#222222", height=40)
 header.pack(fill="x")
@@ -541,7 +543,7 @@ datetime_var.set("")  # wird gleich aktualisiert
 
 # Label für Datum/Uhrzeit (oben rechts)
 datetime_label = tk.Label(header, textvariable=datetime_var,
-                          font=("Arial", 12),  # normale Schrift für Datum/Uhrzeit
+                          font=("Arial", 14),  # normale Schrift für Datum/Uhrzeit
                           bg="#222222", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
 
@@ -549,7 +551,6 @@ datetime_label.pack(side="right", padx=10)
 langloch_height = 80
 radius = langloch_height // 2
 
-icon_size = 64
 extra_width = 20
 padding = 30
 
@@ -697,7 +698,7 @@ if last_station_name:
 
 # Now Playing Anzeige
 now_playing_var = tk.StringVar()
-now_playing_var.set("Es läuft gerade: ---")
+now_playing_var.set("Jetzt läuft:")
 
 now_playing_label = tk.Label(
     root,
