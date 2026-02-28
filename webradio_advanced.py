@@ -86,6 +86,7 @@ class MPV:
 
     def set_volume(self, vol):
         self.send({"command": ["set_property", "volume", vol]})
+        volume_var.set(int(vol))  # GUI-Zahl aktualisieren
 
 mpv = MPV(mpv_socket_path, lambda: player_process)
 
@@ -453,7 +454,11 @@ def update_control_highlight():
     if muted:
         control_canvas.itemconfig(mute_circle, fill=active_red)
 
+
+#################
 # ----- GUI -----
+#################
+
 root = tk.Tk()
 style = ttk.Style()
 style.theme_use("default")
@@ -464,7 +469,7 @@ style.configure(
     thickness=10
 )
 
-# Leise
+# Volume-Bar Leise
 style.configure(
     "Vol.Low.Horizontal.TProgressbar",
     troughcolor="#222",
@@ -474,7 +479,7 @@ style.configure(
     bordercolor="#000",
 )
 
-# Mittel
+# Volume-Bar Mittel
 style.configure(
     "Vol.Mid.Horizontal.TProgressbar",
     troughcolor="#222",
@@ -484,7 +489,7 @@ style.configure(
     bordercolor="#000",
 )
 
-# Laut
+# Volume-Bar Laut
 style.configure(
     "Vol.High.Horizontal.TProgressbar",
     troughcolor="#222",
@@ -508,6 +513,8 @@ humidity_icon_img = load_icon("humidity.png", size=(20, 20))
 wind_rose_base_img = Image.open(os.path.join(BASE_DIR, "img", "wind_rose.png")).convert("RGBA")
 wind_rose_base_img = wind_rose_base_img.resize((20,20), Image.LANCZOS)
 wind_rose_photo = ImageTk.PhotoImage(wind_rose_base_img)
+volume_var = tk.IntVar()
+volume_var.set(50)  # Startwert der Lautstärke (z.B. 50%)
 
 root.play_icon = play_icon
 root.stop_icon = stop_icon
@@ -768,15 +775,29 @@ volume_slot_x = 550
 volume_slot_y = BUTTON_Y
 volume_slot_width = 140
 volume_slot_height = 24
+bar_radius = volume_slot_height / 2  # volle Höhe → Kapsel
 
-# Hintergrundrechteck für die Leiste
-control_canvas.create_rectangle(
+# Hintergrund Langloch
+control_canvas.create_oval(
     volume_slot_x - volume_slot_width/2,
-    volume_slot_y - volume_slot_height/2,
+    volume_slot_y - bar_radius,
+    volume_slot_x - volume_slot_width/2 + bar_radius*2,
+    volume_slot_y + bar_radius,
+    fill="#3a3a3a", outline=""
+)
+control_canvas.create_oval(
+    volume_slot_x + volume_slot_width/2 - bar_radius*2,
+    volume_slot_y - bar_radius,
     volume_slot_x + volume_slot_width/2,
-    volume_slot_y + volume_slot_height/2,
-    fill="#3a3a3a",
-    outline=""
+    volume_slot_y + bar_radius,
+    fill="#3a3a3a", outline=""
+)
+control_canvas.create_rectangle(
+    volume_slot_x - volume_slot_width/2 + bar_radius,
+    volume_slot_y - bar_radius,
+    volume_slot_x + volume_slot_width/2 - bar_radius,
+    volume_slot_y + bar_radius,
+    fill="#3a3a3a", outline=""
 )
 
 # Progressbar
@@ -784,13 +805,49 @@ volume_var = tk.IntVar(value=current_volume)
 volume_bar = ttk.Progressbar(
     control_canvas,
     orient="horizontal",
-    length=volume_slot_width-10,
+    length=volume_slot_width - 16,
     mode="determinate",
     maximum=100,
     variable=volume_var
 )
 control_canvas.create_window(volume_slot_x, volume_slot_y, window=volume_bar)
 update_volume_style()
+
+# Label für die Lautstärke direkt unterhalb der Bar
+label_width = 30
+label_height = 20
+label_radius = 6
+label_padding_top = 2
+
+# Hintergrund Kapsel
+x0 = volume_slot_x - label_width/2
+y0 = volume_slot_y + volume_slot_height/2 + label_padding_top
+x1 = volume_slot_x + label_width/2
+y1 = y0 + label_height
+
+control_canvas.create_oval(x0, y0, x0 + label_radius*2, y1, fill="#3a3a3a", outline="")
+control_canvas.create_oval(x1 - label_radius*2, y0, x1, y1, fill="#3a3a3a", outline="")
+control_canvas.create_rectangle(x0 + label_radius, y0, x1 - label_radius, y1, fill="#3a3a3a", outline="")
+
+volume_label = tk.Label(
+    control_canvas,  # jetzt im gleichen Canvas wie die Bar
+    textvariable=volume_var,
+    font=("Arial", 11),
+    bg="#3a3a3a",
+    fg="white",
+)
+control_canvas.create_window(
+    volume_slot_x, 
+    y0 + label_height/2,
+    window=volume_label
+)
+
+# ------------------------------
+# Funktion zum Setzen der Lautstärke
+# ------------------------------
+def set_volume(self, vol):
+    self.send({"command": ["set_property", "volume", vol]})
+    volume_var.set(vol)  # Zahl aktualisieren
 
 # ------------------------------
 # Direkt initial Highlight aktualisieren
