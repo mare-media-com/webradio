@@ -19,6 +19,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ----- Radiosender -----
 stations = {
+    "Q-Dance": {
+        "url": "http://playerservices.streamtheworld.com/api/livestream-redirect/Q_DANCE.mp3",
+        "logo": "qdance.png"
+    },
     "NDR 2 SH": {
         "url": "https://icecast.ndr.de/ndr/ndr2/schleswigholstein/mp3/128/stream.mp3",
         "logo": "img/ndr2schleswigholstein.png"
@@ -34,6 +38,14 @@ stations = {
     "Ibiza Global Radio": {
         "url": "http://ibizaglobalradio.streaming-pro.com:8024/listen.pls?sid=1",
         "logo": "img/ibizaglobalradio.png"
+    },
+    "Psyradio Psytrance": {
+        "url": "http://streamer.psyradio.org:8030/psytrance/",
+        "logo": "img/psyradiopsytrance.png"
+    },
+    "Psyradio Progressive": {
+        "url": "http://streamer.psyradio.org:8010/progressive/",
+        "logo": "img/psyradioprogressive.png"
     }
 }
 
@@ -105,8 +117,9 @@ def update_datetime():
     wochentag_de = wochentage[jetzt.weekday()]
     
     # Text für Anzeige zusammenstellen
-    datetime_text = f"📅 {wochentag_de}, {jetzt.day:02d}.{jetzt.month:02d}.{jetzt.year}  ⏰ {jetzt.hour:02d}:{jetzt.minute:02d} Uhr"
-    
+    datetime_text = f"📅 {wochentag_de}, {jetzt.day:02d}.{jetzt.month:02d}.{jetzt.year}  🕒 {jetzt.hour:02d}:{jetzt.minute:02d} Uhr"
+    #⏰
+
     # Variable aktualisieren
     datetime_var.set(datetime_text)
     
@@ -154,6 +167,9 @@ def update_weather():
         # Wind
         wind_deg = data["current"]["wind_deg"]
         wind_speed = data["current"]["wind_speed"]
+        # Windböen (falls vorhanden)
+        gust_speed = data["current"].get("wind_gust", wind_speed)
+        gust_bft = ms_to_bft(gust_speed)
         # Beaufort berechnen
         if wind_speed < 0.3: bft = 0
         elif wind_speed < 1.6: bft = 1
@@ -186,6 +202,27 @@ def update_weather():
 
         # Beaufort-Wert daneben aktualisieren
         bft_label.config(text=f"{bft} bft")
+
+        # --- Windwarnsymbol setzen ---
+        if 5 <= gust_bft <= 7:
+            wind_warning_label.config(image=wind_icon_small)
+            wind_warning_label.image = wind_icon_small
+
+        elif 8 <= gust_bft <= 9:
+            wind_warning_label.config(image=sturm_icon)
+            wind_warning_label.image = sturm_icon
+
+        elif 10 <= gust_bft <= 12:
+            wind_warning_label.config(image=orkan_icon)
+            wind_warning_label.image = orkan_icon
+
+        else:
+            wind_warning_label.config(image="")
+
+        if gust_bft >= 10:
+            bft_label.config(fg="#ff4444")
+        else:
+            bft_label.config(fg="white")
 
         weather_desc_var.set(desc.capitalize())
         pressure_label_text.config(text=f"{pressure} hPa")
@@ -513,6 +550,17 @@ humidity_icon_img = load_icon("humidity.png", size=(20, 20))
 wind_rose_base_img = Image.open(os.path.join(BASE_DIR, "img", "wind_rose.png")).convert("RGBA")
 wind_rose_base_img = wind_rose_base_img.resize((20,20), Image.LANCZOS)
 wind_rose_photo = ImageTk.PhotoImage(wind_rose_base_img)
+wind_icon_small = ImageTk.PhotoImage(
+    Image.open(os.path.join(BASE_DIR, "img/weather_icons/wind.png")).resize((32, 32))
+)
+
+sturm_icon = ImageTk.PhotoImage(
+    Image.open(os.path.join(BASE_DIR, "img/weather_icons/sturm.png")).resize((32, 32))
+)
+
+orkan_icon = ImageTk.PhotoImage(
+    Image.open(os.path.join(BASE_DIR, "img/weather_icons/orkan.png")).resize((32, 32))
+)
 volume_var = tk.IntVar()
 volume_var.set(50)  # Startwert der Lautstärke (z.B. 50%)
 
@@ -550,7 +598,7 @@ datetime_var.set("")  # wird gleich aktualisiert
 
 # Label für Datum/Uhrzeit (oben rechts)
 datetime_label = tk.Label(header, textvariable=datetime_var,
-                          font=("Arial", 14),  # normale Schrift für Datum/Uhrzeit
+                          font=("Arial", 12),  # normale Schrift für Datum/Uhrzeit
                           bg="#222222", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
 
@@ -631,6 +679,10 @@ weather_wind_label.pack(side="left", padx=(15,0))
 bft_label = tk.Label(top_row_frame, text="0 bft",  # Platzhalter
                      font=("Arial", 24, "bold"), bg="#333333", fg="white")
 bft_label.pack(side="left", padx=(5,0))
+
+# Wind-Warnsymbol (startet leer)
+wind_warning_label = tk.Label(top_row_frame, bg="#333333")
+wind_warning_label.pack(side="left", padx=(10,0))
 
 # Untere Zeile
 bottom_row_frame = tk.Frame(weather_text_frame, bg="#333333")
