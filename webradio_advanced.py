@@ -1,3 +1,4 @@
+# region imports
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.font as tkFont
@@ -14,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-
+# endregion
 
 # region Global Settings
 
@@ -61,6 +62,7 @@ WEATHER_API_KEY = os.getenv("OWM_KEY")
 
 # ----- Variablen -----
 player_process = None
+is_playing = False
 current_volume = 50
 mpv_socket_path = "/tmp/mpv-socket"
 last_station_file = "/home/pi/webradio/last_station.txt"
@@ -279,11 +281,13 @@ def update_weather():
     root.after(600000, update_weather)  # 600000 = alle 10 Minuten
 
 def play_station(name, url):
-    global player_process, last_station_name, current_station_name
+    global player_process, last_station_name, current_station_name, is_playing
+    if is_playing and player_process:
+        stop_station()
     last_station_name = name
     current_station_name = name
-    now_playing_var.set(f"Jetzt läuft: {current_station_name}")
-    stop_station()
+    is_playing = True
+    # stop_station()
     
     # Klinkenausgang aktivieren
     subprocess.call([
@@ -322,7 +326,14 @@ def highlight_active_station(active_name):
 
 def update_now_playing():
     """Liest den aktuellen ICY-Titel aus mpv und zeigt den Sendernamen, falls kein sinnvoller Titel verfügbar ist."""
-    global current_station_name
+    global current_station_name, is_playing
+
+    if not is_playing:
+        display_text = f"Stopped: {current_station_name}"
+        if now_playing_var.get() != display_text:
+            now_playing_var.set(display_text)
+        root.after(2000, update_now_playing)
+        return  # sofort zurück, keine ICY-Abfrage
 
     # Standardtext: Sendername
     display_text = f"Jetzt läuft: {current_station_name}"
@@ -395,7 +406,7 @@ def play_last_station():
     update_station_buttons()
 
 def stop_station():
-    global player_process
+    global player_process, is_playing
 
     # Socket löschen, bevor mpv beendet wird
     if os.path.exists(mpv_socket_path):
@@ -405,9 +416,11 @@ def stop_station():
             pass
 
     # mpv Prozess beenden
-    if player_process and player_process.poll() is None:
+    if is_playing and player_process and player_process.poll() is None:
         player_process.terminate()
         player_process = None
+
+    is_playing = False
 
     update_control_highlight()
 
