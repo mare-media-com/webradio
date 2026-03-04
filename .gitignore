@@ -4,4 +4,4 @@ __pycache__/
 .vscode/
 .env
 _sic/
-.code-workspace
+*.code-workspace
