@@ -15,13 +15,20 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
+
+# region Global Settings
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ----- Radiosender -----
 stations = {
+    "R.SH": {
+        "url": "https://streams.rsh.de/rsh-live/mp3-128/streams.rsh.de/",
+        "logo": "img/rsh.png"
+    },
     "Q-Dance": {
         "url": "http://playerservices.streamtheworld.com/api/livestream-redirect/Q_DANCE.mp3",
-        "logo": "qdance.png"
+        "logo": "img/qdance.png"
     },
     "NDR 2 SH": {
         "url": "https://icecast.ndr.de/ndr/ndr2/schleswigholstein/mp3/128/stream.mp3",
@@ -30,10 +37,6 @@ stations = {
     "Beats Radio": {
         "url": "http://live.streams.klassikradio.de/beats-radio/stream/mp3",
         "logo": "img/beatsradio.png"
-    },
-    "R.SH": {
-        "url": "https://streams.rsh.de/rsh-live/mp3-128/streams.rsh.de/",
-        "logo": "img/rsh.png"
     },
     "Ibiza Global Radio": {
         "url": "http://ibizaglobalradio.streaming-pro.com:8024/listen.pls?sid=1",
@@ -56,9 +59,7 @@ load_dotenv(dotenv_path=env_path)
 # API-Key aus Umgebungsvariable
 WEATHER_API_KEY = os.getenv("OWM_KEY")
 
-# Test-Ausgabe
-# print("API Key:", WEATHER_API_KEY)
-
+# ----- Variablen -----
 player_process = None
 current_volume = 50
 mpv_socket_path = "/tmp/mpv-socket"
@@ -73,6 +74,10 @@ WEATHER_LON = "9.52438474"
 WEATHER_EXCL = "minutely,hourly,daily,alerts"
 
 load_dotenv()
+# endregion
+
+
+# region MPV-Player
 
 # ----- IPC-Kommunikation -----
 class MPV:
@@ -101,8 +106,11 @@ class MPV:
         volume_var.set(int(vol))  # GUI-Zahl aktualisieren
 
 mpv = MPV(mpv_socket_path, lambda: player_process)
+# endregion
 
-# ----- Funktionen -----
+
+# region Funktionen
+
 def load_icon(filename, size=(48, 48)):
     path = os.path.join(BASE_DIR, "img", filename)
     img = Image.open(path)
@@ -364,9 +372,27 @@ def update_now_playing():
     root.after(2000, update_now_playing)
 
 def play_last_station():
+    global station_start_index
+
     if last_station_name and last_station_name in stations:
         play_station(last_station_name, stations[last_station_name]["url"])
         update_control_highlight()
+
+    if last_station_name in stations_list:
+        idx = stations_list.index(last_station_name)
+
+        # Ziel: aktiver Sender möglichst mittig (Position 2 oder 3)
+        # Position innerhalb der sichtbaren Sender: pos = 1 (Index 0=erste Position)
+        middle_pos = VISIBLE_STATIONS // 2  # z.B. 4//2 = 2 → Index 2 = Position 3
+        station_start_index = idx - middle_pos
+
+        # Grenzen überprüfen, nicht unter 0 und nicht über das Maximum
+        if station_start_index < 0:
+            station_start_index = 0
+        if station_start_index + VISIBLE_STATIONS > len(stations_list):
+            station_start_index = len(stations_list) - VISIBLE_STATIONS
+
+    update_station_buttons()
 
 def stop_station():
     global player_process
@@ -460,9 +486,6 @@ def save_last_station(name):
     with open(last_station_file, "w") as f:
         f.write(name)
 
-# ------------------------------
-# Highlight / Zustand
-# ------------------------------
 def update_control_highlight():
     """Aktive Zustände visuell darstellen"""
     normal = "#666666"
@@ -490,11 +513,12 @@ def update_control_highlight():
     # Mute
     if muted:
         control_canvas.itemconfig(mute_circle, fill=active_red)
+# endregion
 
 
-#################
+# region GUI & Header
+
 # ----- GUI -----
-#################
 
 root = tk.Tk()
 style = ttk.Style()
@@ -503,7 +527,7 @@ style.theme_use("default")
 # Standardhöhe Lautstärke-Bar (Fallback)
 style.configure(
     "TProgressbar",
-    thickness=10
+    thickness=5
 )
 
 # Volume-Bar Leise
@@ -601,6 +625,10 @@ datetime_label = tk.Label(header, textvariable=datetime_var,
                           font=("Arial", 12),  # normale Schrift für Datum/Uhrzeit
                           bg="#222222", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
+# endregion
+
+
+# region Wetter
 
 # ----- Wetteranzeige als "Langloch" -----
 langloch_height = 80
@@ -620,7 +648,7 @@ weather_canvas = tk.Canvas(
 )
 weather_canvas.pack(pady=15)
 
-# ✅ Langloch-Hintergrund speichern (WICHTIG!)
+# Langloch-Hintergrund speichern
 weather_bg_rect = weather_canvas.create_rectangle(
     radius, 0,
     initial_width - radius, langloch_height,
@@ -717,42 +745,115 @@ humidity_label_icon.pack(side="left")
 humidity_label_text = tk.Label(weather_details_frame, text="0%",
                                font=("Arial", 12), bg="#333333", fg="#bbbbbb")
 humidity_label_text.pack(side="left", padx=(3,0))
+# endregion
 
-# Sender-Buttons
+
+# region Senderauswahl
+
+# Sender-Buttons + Scroll-Pfeile
 button_frame = tk.Frame(root, bg="#222")
 button_frame.pack(pady=5)
 
+button_frame.grid_columnconfigure(0, weight=0)
+button_frame.grid_columnconfigure(1, weight=1)
+button_frame.grid_columnconfigure(2, weight=1)
+button_frame.grid_columnconfigure(3, weight=1)
+button_frame.grid_columnconfigure(4, weight=1)
+button_frame.grid_columnconfigure(5, weight=0)
+
+# Senderliste automatisch aus Dictionary erzeugen
+stations_list = list(stations.keys())
+# print("Stations list:", stations_list)
+VISIBLE_STATIONS = 4
+station_start_index = 0
 buttons = {}
-col = 0
 
-for name, info in stations.items():
+# Scroll-Funktionen
+def scroll_left():
+    global station_start_index
+    if station_start_index > 0:
+        station_start_index -= 1
+        update_station_buttons()
 
+def scroll_right():
+    global station_start_index
+    if station_start_index + VISIBLE_STATIONS < len(stations_list):
+        station_start_index += 1
+        update_station_buttons()
+
+# Sender-Buttons erstellen
+for name in stations_list:
+    info = stations[name]
     logo_path = os.path.join(BASE_DIR, info["logo"])
 
     if os.path.exists(logo_path):
-        img = Image.open(logo_path)
-        img = img.resize((150, 150))   # <<< PERFEKTE Größe
+        img = Image.open(logo_path).resize((150,150), Image.LANCZOS)
         photo = ImageTk.PhotoImage(img)
     else:
         photo = None
 
-
     btn = tk.Button(
         button_frame,
         image=photo,
-        command=lambda n=name, u=info["url"]: play_station(n, u),
-        bg="#222",
+        command=lambda n=name: play_station(n, stations[n]["url"]),
+        # bg="#222",
+        bg="#e3e3e3",
         activebackground="#222",
         bd=0
     )
-    
     btn.image = photo
-    btn.grid(row=0, column=col, padx=15, pady=10)
-    col += 1
-
     buttons[name] = btn
 
-if last_station_name:
+# Scroll-Pfeile erstellen
+left_arrow_img = load_icon("arrow_left.png", size=(40,140))
+right_arrow_img = load_icon("arrow_right.png", size=(40,140))
+
+left_arrow_btn = tk.Button(
+    button_frame,
+    image=left_arrow_img,
+    bg="#222",
+    bd=0,
+    highlightthickness=1,          # Rahmendicke
+    highlightbackground="#444",    # unauffälliges Grau
+    activebackground="#222",
+    command=scroll_left)
+
+right_arrow_btn = tk.Button(
+    button_frame,image=right_arrow_img,
+    bg="#222",
+    bd=0,
+    highlightthickness=1,          # Rahmendicke
+    highlightbackground="#444",    # unauffälliges Grau
+    activebackground="#222",
+    command=scroll_right)
+
+# Layout-Funktion
+def update_station_buttons():
+    # Alles entfernen
+    for btn in buttons.values():
+        btn.grid_forget()
+    left_arrow_btn.grid_forget()
+    right_arrow_btn.grid_forget()
+
+    # Sichtbare Sender bestimmen
+    visible = stations_list[station_start_index:station_start_index + VISIBLE_STATIONS]
+
+    # Sender anzeigen
+    for col, name in enumerate(visible):
+        buttons[name].grid(row=0, column=col+1, padx=5, pady=10)
+
+    # Pfeile anzeigen falls nötig
+    if station_start_index > 0:
+        left_arrow_btn.grid(row=0, column=0, padx=(5,0))
+
+    if station_start_index + VISIBLE_STATIONS < len(stations_list):
+        right_arrow_btn.grid(row=0, column=VISIBLE_STATIONS+1, padx=(0,5))
+
+# Initial anzeigen
+root.after(100, update_station_buttons)
+
+# Letzten Sender hervorheben
+if last_station_name and last_station_name in buttons:
     highlight_active_station(last_station_name)
 
 # Now Playing Anzeige
@@ -767,7 +868,12 @@ now_playing_label = tk.Label(
     fg="#bbbbbb"
 )
 now_playing_label.pack(pady=5)
+# endregion
 
+
+# region Playerfunktionalität
+
+# Player-Steuerung
 control_canvas = tk.Canvas(
     root,
     width=800,
@@ -804,9 +910,8 @@ def create_circle_button(canvas, x, y, r, image, command):
     
     return circle
 
-# ------------------------------
+
 # Buttons erzeugen
-# ------------------------------
 
 # Stop / Play / Exit
 stop_circle = create_circle_button(control_canvas, 90, BUTTON_Y, BUTTON_MAIN, root.stop_icon, stop_station)
@@ -820,9 +925,7 @@ mute_circle = create_circle_button(control_canvas, 380, BUTTON_Y, BUTTON_SIDE, r
 vol_down_circle = create_circle_button(control_canvas, 450, BUTTON_Y, BUTTON_SIDE, root.volume_down_icon, vol_down)
 vol_up_circle   = create_circle_button(control_canvas, 650, BUTTON_Y, BUTTON_SIDE, root.volume_up_icon, vol_up)
 
-# ------------------------------
 # Volume-Bar Slot
-# ------------------------------
 volume_slot_x = 550
 volume_slot_y = BUTTON_Y
 volume_slot_width = 140
@@ -894,16 +997,12 @@ control_canvas.create_window(
     window=volume_label
 )
 
-# ------------------------------
 # Funktion zum Setzen der Lautstärke
-# ------------------------------
 def set_volume(self, vol):
     self.send({"command": ["set_property", "volume", vol]})
     volume_var.set(vol)  # Zahl aktualisieren
 
-# ------------------------------
 # Direkt initial Highlight aktualisieren
-# ------------------------------
 update_control_highlight()
 
 last = load_last_station()
@@ -914,6 +1013,8 @@ if last:
     update_control_highlight()    # Play-Button grün setzen
 else:
     update_control_highlight()    # Stop grün, falls keine Station
+# endregion
+
 
 # sofort starten
 update_datetime()
