@@ -824,8 +824,8 @@ for name in stations_list:
         image=photo,
         command=lambda n=name: play_station(n, stations[n]["url"]),
         # bg="#222",
-        bg="#e3e3e3",
-        activebackground="#222",
+        bg="#c4c4c4", #e3e3e3
+        activebackground="#808080",
         bd=0
     )
     btn.image = photo
