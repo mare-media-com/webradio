@@ -17,7 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 # endregion
 
-# region Global Settings
+# region Settings
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -74,6 +74,18 @@ last_volume_before_mute = current_volume
 WEATHER_LAT = "54.80797555"
 WEATHER_LON = "9.52438474"
 WEATHER_EXCL = "minutely,hourly,daily,alerts"
+
+# Korrektur der deutschen Wetterbeschreibungen
+description_map = {
+    "ein paar wolken": "Heiter bis wolkig",
+    "leicht bewölkt": "Leicht bewölkt",
+    "überwiegend bewölkt": "Wolkig",
+    "bedeckt": "Bedeckt",
+    "klarer himmel": "Klarer Himmel",
+    "mäßiger regen": "Mäßiger Regen",
+    "leichter regen": "Leichter Regen",
+    "starker regen": "Starker Regen",
+}
 
 load_dotenv()
 # endregion
@@ -162,7 +174,9 @@ def update_weather():
 
         # Temperatur, Beschreibung, Icon
         temp = round(data["current"]["temp"])
-        desc = data["current"]["weather"][0]["description"]
+        desc = data["current"]["weather"][0]["description"].strip()
+        # Beschreibung korrigieren
+        desc = description_map.get(desc.lower(), desc)
         icon_code = data["current"]["weather"][0]["icon"]
 
         # --- PNG Icon setzen ---
@@ -234,7 +248,7 @@ def update_weather():
         else:
             bft_label.config(fg="white")
 
-        weather_desc_var.set(desc.capitalize())
+        weather_desc_var.set(desc)
         pressure_label_text.config(text=f"{pressure} hPa")
         humidity_label_text.config(text=f"{humidity}%")
 
@@ -1029,9 +1043,12 @@ else:
 # endregion
 
 
+# region loop
+
 # sofort starten
 update_datetime()
 update_weather()
 update_now_playing()
 
 root.mainloop()
+# endregion
