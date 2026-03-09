@@ -1,0 +1,3 @@
+OWM_KEY = YOUR_OWM_KEY
+MQTT_HOST = YOUR_MQTT_IP
+MQTT_PORT = YOUR_MQTT_PORT # (for example 9001 for websocket)
