@@ -6,21 +6,6 @@ Ggf. müssen dann allerdings noch Anpassungen vorgenommen werden.
 
 -----
 
-## Inhaltsverzeichnis
-
-- [Features](#features)
-- [Voraussetzungen](#voraussetzungen)
-- [Installation](#installation)
-- [Konfiguration](#konfiguration)
-- [DesktopIcon](#desktopicon)
-- [Start](#start)
-- [Ordnerstruktur](#ordnerstruktur)
-- [Screenshot](#screenshot)
-- [Lizenz](#lizenz)
-- [Autor](#autor)
-
------
-
 ## Features
 
 - Anzeige von aktuellen Wetterdaten (OpenWeatherMap)  
