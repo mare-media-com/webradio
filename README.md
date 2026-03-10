@@ -141,4 +141,4 @@ Dieses Projekt steht unter der MIT-Lizenz. Du darfst den Code frei verwenden, ko
 
 ## Autor
 
-Projekt erstellt von **codewerkstatt @ mare-media.com**
+by **codewerkstatt @ mare-media.com**
