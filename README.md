@@ -17,6 +17,7 @@ Ggf. müssen dann allerdings noch Anpassungen vorgenommen werden.
 - [Ordnerstruktur](#ordnerstruktur)
 - [Screenshot](#screenshot)
 - [Lizenz](#lizenz)
+- [Autor](#autor)
 
 -----
 
@@ -135,3 +136,9 @@ webradio/
 ## Lizenz
 
 Dieses Projekt steht unter der MIT-Lizenz. Du darfst den Code frei verwenden, kopieren und anpassen.
+
+-----
+
+## Autor
+
+Projekt erstellt von **codewerkstatt @ mare-media.com**.
