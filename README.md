@@ -74,6 +74,7 @@ Abhängigkeiten installieren:
 
 - /img/webradio.png
 
+```
 Datei:
 webradio.desktop in /home/<user>/Desktop
 
@@ -89,6 +90,7 @@ Encoding=UTF-8
 Terminal=false
 Categories=Audio;
 Name[de_DE]=WebRadio
+```
 
 -----
 
@@ -103,6 +105,7 @@ cp ~/Desktop/webradio.desktop ~/.config/autostart/
 
 ## Ordnerstruktur
 
+```
 webradio/
 ├── webradio_advanced.py	# Hauptskript
 ├── img/					# Icons als PNGs
@@ -119,6 +122,7 @@ webradio/
 └── .env       				# individuelle Umgebungsvariablen
 └── .envexample       		# Kopiervorlage
 └── last_station.txt     	# (leere) Textdatei zum Speichern des zuletzt gespielten Senders
+```
 
 -----
 
