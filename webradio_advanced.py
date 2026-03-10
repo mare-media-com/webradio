@@ -1,7 +1,6 @@
 # region imports
 import tkinter as tk
 import tkinter.ttk as ttk
-import tkinter.font as tkFont
 import paho.mqtt.client as mqtt
 import subprocess
 import sys
@@ -12,7 +11,7 @@ import json
 import socket
 import requests
 import threading
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIL import Image, ImageTk
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -60,11 +59,16 @@ load_dotenv(dotenv_path=env_path)
 
 # API-Key aus Umgebungsvariable
 WEATHER_API_KEY = os.getenv("OWM_KEY")
+WEATHER_LAT = os.getenv("WEATHER_LAT")
+WEATHER_LON = os.getenv("WEATHER_LON")
+WEATHER_EXCL = os.getenv("WEATHER_EXCL")
 
 # MQTT Daten aus Umgebungsvariable
 MQTT_HOST = os.getenv("MQTT_HOST")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TIMEOUT = 300  # Sekunden, nach denen Werte als veraltet gelten
+TEMP_TOPIC = os.getenv("TEMP_TOPIC")
+HUMI_TOPIC = os.getenv("HUMI_TOPIC")
 
 # ----- Variablen -----
 player_process = None
@@ -77,9 +81,6 @@ current_station_name = ""
 active_control = None
 muted = False
 last_volume_before_mute = current_volume
-WEATHER_LAT = "54.80797555"
-WEATHER_LON = "9.52438474"
-WEATHER_EXCL = "minutely,hourly,daily,alerts"
 
 # Korrektur der deutschen Wetterbeschreibungen
 description_map = {
@@ -146,7 +147,6 @@ def update_datetime():
     
     # Text für Anzeige zusammenstellen
     datetime_text = f"📅 {wochentag_de}, {jetzt.day:02d}.{jetzt.month:02d}.{jetzt.year}  🕒 {jetzt.hour:02d}:{jetzt.minute:02d} Uhr"
-    #⏰
 
     # Variable aktualisieren
     datetime_var.set(datetime_text)
@@ -1257,8 +1257,8 @@ def update_led(canvas, item_id, value, value_type):
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("MQTT verbunden")
-        client.subscribe("esp32/bme280/temperature")
-        client.subscribe("esp32/bme280/humidity")
+        client.subscribe(TEMP_TOPIC)
+        client.subscribe(HUMI_TOPIC)
     else:
         print("MQTT-Verbindungsfehler:", rc)
 
@@ -1266,11 +1266,11 @@ def on_message(client, userdata, msg):
     global last_temp_update, last_hum_update
     try:
         value = float(msg.payload.decode())
-        if msg.topic == "esp32/bme280/temperature":
+        if msg.topic == TEMP_TOPIC:
             room_temp_var.set(f"{value:.2f} °C")
             update_led(temp_led, temp_led_circle, value, "temp")
             last_temp_update = time.time()
-        elif msg.topic == "esp32/bme280/humidity":
+        elif msg.topic == HUMI_TOPIC:
             room_hum_var.set(f"{value:.2f} %")
             update_led(hum_led, hum_led_circle, value, "hum")
             last_hum_update = time.time()
@@ -1285,7 +1285,7 @@ def mqtt_thread():
     client.loop_forever()
 
 threading.Thread(target=mqtt_thread, daemon=True).start()
-# endregion MQTT-Verbindung
+# endregion MQTT-Abruf
 
 
 # region loop
