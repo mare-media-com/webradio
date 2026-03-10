@@ -12,6 +12,7 @@ Ggf. müssen dann allerdings noch Anpassungen vorgenommen werden.
 - [Voraussetzungen](#voraussetzungen)
 - [Installation](#installation)
 - [Konfiguration](#konfiguration)
+- [DesktopIcon](#desktopicon)
 - [Start](#start)
 - [Ordnerstruktur](#ordnerstruktur)
 - [Screenshot](#screenshot)
@@ -69,8 +70,34 @@ Abhängigkeiten installieren:
 
 -----
 
+## DesktopIcon:
+
+- /img/webradio.png
+
+Datei:
+webradio.desktop in /home/<user>/Desktop
+
+Inhalt:
+[Desktop Entry]
+Type=Application
+Name=WebRadio
+Comment=Raspberry Pi WebRadio
+Exec=python3 /home/<user>/webradio/webradio_advanced.py
+Path=/home/<user>/webradio
+Icon=/home/<user>/webradio/img/webradio.png
+Encoding=UTF-8
+Terminal=false
+Categories=Audio;
+Name[de_DE]=WebRadio
+
+-----
+
 ## Start:
+
 - python3 webradio_advanced.py
+
+Für Autostart nach Boot:
+cp ~/Desktop/webradio.desktop ~/.config/autostart/
 
 -----
 
