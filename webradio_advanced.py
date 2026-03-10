@@ -181,6 +181,7 @@ def update_weather():
         # Temperatur, Beschreibung, Icon
         temp = round(data["current"]["temp"])
         desc = data["current"]["weather"][0]["description"].strip()
+        
         # Beschreibung korrigieren
         desc = description_map.get(desc.lower(), desc)
         icon_code = data["current"]["weather"][0]["icon"]
@@ -197,9 +198,11 @@ def update_weather():
         # Wind
         wind_deg = data["current"]["wind_deg"]
         wind_speed = data["current"]["wind_speed"]
+        
         # Windböen (falls vorhanden)
         gust_speed = data["current"].get("wind_gust", wind_speed)
         gust_bft = ms_to_bft(gust_speed)
+        
         # Beaufort berechnen
         if wind_speed < 0.3: bft = 0
         elif wind_speed < 1.6: bft = 1
@@ -268,7 +271,7 @@ def update_weather():
         # Canvas Breite ändern
         weather_canvas.config(width=langloch_width)
 
-        # ✅ Hintergrund GEOMETRISCH korrekt verschieben
+        # Hintergrund GEOMETRISCH korrekt verschieben
         weather_canvas.coords(weather_bg_rect,
             radius, 0,
             langloch_width - radius, langloch_height
@@ -293,8 +296,6 @@ def update_weather():
     except Exception as e:
         weather_temp_var.set("--°C")
         weather_desc_var.set("Wetterdaten Fehler")
-        # weather_wind_var.set("")
-        # weather_details_var.set("")
         print("Weather update error:", e)
 
     # alle 10 Minuten wiederholen
@@ -305,8 +306,8 @@ def check_timeout():
     now = time.time()
     
     # Temperatur
+    # Wert zu alt → LED grau, aber Variablen bleiben unverändert
     if now - last_temp_update > MQTT_TIMEOUT:
-        # Wert zu alt → LED grau, aber Variablen bleiben unverändert
         temp_led.itemconfig(temp_led_circle, fill="#555555")
     
     # Luftfeuchtigkeit
@@ -323,7 +324,6 @@ def play_station(name, url):
     last_station_name = name
     current_station_name = name
     is_playing = True
-    # stop_station()
     
     # Klinkenausgang aktivieren
     subprocess.call([
@@ -356,9 +356,9 @@ def play_station(name, url):
 def highlight_active_station(active_name):
     for name, btn in buttons.items():
         if name == active_name:
-            btn.config(highlightbackground="#22aa22", highlightthickness=5)  # #22aa22=grün #FFC200=gelb
+            btn.config(highlightbackground="#22aa22", highlightthickness=5)
         else:
-            btn.config(highlightbackground="#222", highlightthickness=1)       # neutral
+            btn.config(highlightbackground="#222", highlightthickness=1)
 
 def update_now_playing():
     """Liest den aktuellen ICY-Titel aus mpv und zeigt den Sendernamen, falls kein sinnvoller Titel verfügbar ist."""
@@ -428,16 +428,18 @@ def play_last_station():
     if last_station_name in stations_list:
         idx = stations_list.index(last_station_name)
 
-        # Ziel: aktiver Sender möglichst mittig (Position 2 oder 3)
-        # Position innerhalb der sichtbaren Sender: pos = 1 (Index 0=erste Position)
-        middle_pos = VISIBLE_STATIONS // 2  # z.B. 4//2 = 2 → Index 2 = Position 3
-        station_start_index = idx - middle_pos
+        # Ziel: aktiver Sender an Position 2 (Index 1), wenn möglich
+        if 1 <= idx <= len(stations_list) - 2:  # nicht erster oder letzter Sender
+            station_start_index = idx - 1
+        else:
+            # Sender am Anfang oder Ende → normale Startposition
+            station_start_index = max(0, min(idx, len(stations_list) - VISIBLE_STATIONS))
 
-        # Grenzen überprüfen, nicht unter 0 und nicht über das Maximum
-        if station_start_index < 0:
-            station_start_index = 0
+        # Grenze nach rechts prüfen, damit immer VISIBLE_STATIONS angezeigt werden
         if station_start_index + VISIBLE_STATIONS > len(stations_list):
             station_start_index = len(stations_list) - VISIBLE_STATIONS
+            if station_start_index < 0:
+                station_start_index = 0    
 
     update_station_buttons()
 
@@ -669,11 +671,11 @@ title_label.pack(side="left", padx=10)
 
 # Variable für Datum/Uhrzeit
 datetime_var = tk.StringVar()
-datetime_var.set("")  # wird gleich aktualisiert
+datetime_var.set("")
 
 # Label für Datum/Uhrzeit (oben rechts)
 datetime_label = tk.Label(header, textvariable=datetime_var,
-                          font=("Arial", 12),  # normale Schrift für Datum/Uhrzeit
+                          font=("Arial", 12),
                           bg="#222222", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
 # endregion GUI & Header
@@ -683,7 +685,6 @@ datetime_label.pack(side="right", padx=10)
 
 # Gesamtframe für beide Langlöcher
 dashboard_frame = tk.Frame(root, bg="#222222")
-# dashboard_frame.pack(pady=15, fill="x")  # Abstand nach oben, volle Breite
 dashboard_frame.pack(anchor="center", pady=15)
 
 # ----- Wetteranzeige als "Langloch" -----
@@ -692,16 +693,29 @@ radius = langloch_height // 2
 
 extra_width = 20
 padding = 30
-initial_width = 400  # bewusst etwas größer wählen
+initial_width = 400
+
+weather_container = tk.Frame(dashboard_frame, bg="#222222")
+weather_container.pack(side="left", padx=(0,10))
 
 weather_canvas = tk.Canvas(
-    dashboard_frame,   # in Dashboard-Frame packen
+    weather_container,
     width=initial_width,
     height=langloch_height,
     bg="#222222",
     highlightthickness=0
 )
-weather_canvas.pack(side="left", padx=(0, 10))  # rechts Abstand zum Raumklima
+weather_canvas.pack()
+
+# Label für Wetter-Anzeige
+weather_label = tk.Label(
+    weather_container,
+    text="OWM Wetter aktuell",
+    bg="#222222",
+    fg="#B2DAF3",
+    font=("Arial",9)
+)
+weather_label.pack(pady=(1,0))
 
 # Langloch-Hintergrund speichern
 weather_bg_rect = weather_canvas.create_rectangle(
@@ -802,14 +816,28 @@ humidity_label_text.pack(side="left", padx=(3,0))
 
 # ----- Raumklima-Langloch -----
 raumklima_width = 220
+
+raumklima_container = tk.Frame(dashboard_frame, bg="#222222")
+raumklima_container.pack(side="left")
+
 raumklima_canvas = tk.Canvas(
-    dashboard_frame,
+    raumklima_container,
     width=raumklima_width,
     height=langloch_height,
     bg="#222222",
     highlightthickness=0
 )
-raumklima_canvas.pack(side="left")  # rechts neben Wetter-Langloch
+raumklima_canvas.pack()
+
+# Label für Raumklima-Anzeige
+raumklima_label = tk.Label(
+    raumklima_container,
+    text="Raumklima",
+    bg="#222222",
+    fg="#B2DAF3",
+    font=("Arial",9)
+)
+raumklima_label.pack(pady=(1,0))
 
 # Hintergrund
 raumklima_bg_rect = raumklima_canvas.create_rectangle(
@@ -860,7 +888,7 @@ room_temp_label = tk.Label(
     textvariable=room_temp_var,
     font=("Arial", 14, "bold"),
     bg="#333333",
-    fg="#B2DAF3",
+    fg="#ffffff",
     width=10,
     anchor="w"
 )
@@ -875,9 +903,24 @@ temp_led = tk.Canvas(
 temp_led.pack(side="left", padx=(4,8))
 room_temp_label.pack(side="left")
 
+# Glow
+temp_led_glow = temp_led.create_oval(
+    0,0,18,18,
+    fill="#444444",
+    outline=""
+)
+
+# LED
 temp_led_circle = temp_led.create_oval(
-    2,2,16,16,
+    3,3,15,15,
     fill="blue",
+    outline=""
+)
+
+# Reflex
+temp_led_reflex = temp_led.create_oval(
+    6,5,9,8,
+    fill="#ffffff",
     outline=""
 )
 
@@ -894,9 +937,9 @@ room_hum_var = tk.StringVar(value="--.-- %")
 room_hum_label = tk.Label(
     hum_row,
     textvariable=room_hum_var,
-    font=("Arial", 14, "bold"),
+    font=("Arial", 14),
     bg="#333333",
-    fg="#B2DAF3",
+    fg="#bbbbbb",
     width=10,
     anchor="w"
 )
@@ -911,9 +954,24 @@ hum_led = tk.Canvas(
 hum_led.pack(side="left", padx=(4,8))
 room_hum_label.pack(side="left")
 
+# Glow
+hum_led_glow = hum_led.create_oval(
+    0,0,18,18,
+    fill="#444444",
+    outline=""
+)
+
+# LED
 hum_led_circle = hum_led.create_oval(
-    2,2,16,16,
-    fill="red",
+    3,3,15,15,
+    fill="blue",
+    outline=""
+)
+
+# Reflex
+hum_led_reflex = hum_led.create_oval(
+    6,5,9,8,
+    fill="#ffffff",
     outline=""
 )
 # endregion Wetter + Raumklima
@@ -923,7 +981,7 @@ hum_led_circle = hum_led.create_oval(
 
 # Sender-Buttons + Scroll-Pfeile
 button_frame = tk.Frame(root, bg="#222")
-button_frame.pack(pady=5)
+button_frame.pack(pady=(2,0))
 
 button_frame.grid_columnconfigure(0, weight=0)
 button_frame.grid_columnconfigure(1, weight=1)
@@ -967,8 +1025,7 @@ for name in stations_list:
         button_frame,
         image=photo,
         command=lambda n=name: play_station(n, stations[n]["url"]),
-        # bg="#222",
-        bg="#c4c4c4", #e3e3e3
+        bg="#c4c4c4",
         activebackground="#808080",
         bd=0
     )
@@ -984,8 +1041,8 @@ left_arrow_btn = tk.Button(
     image=left_arrow_img,
     bg="#222",
     bd=0,
-    highlightthickness=1,          # Rahmendicke
-    highlightbackground="#444",    # unauffälliges Grau
+    highlightthickness=1,
+    highlightbackground="#444",
     activebackground="#222",
     command=scroll_left)
 
@@ -993,8 +1050,8 @@ right_arrow_btn = tk.Button(
     button_frame,image=right_arrow_img,
     bg="#222",
     bd=0,
-    highlightthickness=1,          # Rahmendicke
-    highlightbackground="#444",    # unauffälliges Grau
+    highlightthickness=1,
+    highlightbackground="#444",
     activebackground="#222",
     command=scroll_right)
 
@@ -1038,7 +1095,7 @@ now_playing_label = tk.Label(
     bg="#222",
     fg="#bbbbbb"
 )
-now_playing_label.pack(pady=5)
+now_playing_label.pack(pady=(5,0))
 # endregion Senderauswahl
 
 
@@ -1101,7 +1158,7 @@ volume_slot_x = 550
 volume_slot_y = BUTTON_Y
 volume_slot_width = 140
 volume_slot_height = 24
-bar_radius = volume_slot_height / 2  # volle Höhe → Kapsel
+bar_radius = volume_slot_height / 2
 
 # Hintergrund Langloch
 control_canvas.create_oval(
@@ -1139,32 +1196,16 @@ volume_bar = ttk.Progressbar(
 control_canvas.create_window(volume_slot_x, volume_slot_y, window=volume_bar)
 update_volume_style()
 
-# Label für die Lautstärke direkt unterhalb der Bar
-label_width = 30
-label_height = 20
-label_radius = 6
-label_padding_top = 2
-
-# Hintergrund Kapsel
-x0 = volume_slot_x - label_width/2
-y0 = volume_slot_y + volume_slot_height/2 + label_padding_top
-x1 = volume_slot_x + label_width/2
-y1 = y0 + label_height
-
-control_canvas.create_oval(x0, y0, x0 + label_radius*2, y1, fill="#3a3a3a", outline="")
-control_canvas.create_oval(x1 - label_radius*2, y0, x1, y1, fill="#3a3a3a", outline="")
-control_canvas.create_rectangle(x0 + label_radius, y0, x1 - label_radius, y1, fill="#3a3a3a", outline="")
-
 volume_label = tk.Label(
-    control_canvas,  # jetzt im gleichen Canvas wie die Bar
+    control_canvas,
     textvariable=volume_var,
-    font=("Arial", 11),
-    bg="#3a3a3a",
+    font=("Arial", 9),
+    bg="#222222",
     fg="white",
 )
 control_canvas.create_window(
     volume_slot_x, 
-    y0 + label_height/2,
+    volume_slot_y + volume_slot_height/2 + 9,
     window=volume_label
 )
 
