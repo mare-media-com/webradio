@@ -1,0 +1,11 @@
+# OpenWeatherMap Einstellungen
+OWM_KEY = YOUR_OWM_KEY                      # (create at https://openweathermap.org/)
+WEATHER_LAT = YOUR_LATITUDE                 # (e.g. 54.80797555)
+WEATHER_LON = YOUR_LONGITUDE                # (e.g. 9.52438474)
+WEATHER_EXCL = minutely,hourly,daily,alerts # (see OWM documentation)
+
+# MQTT Konfiguration
+MQTT_HOST = YOUR_MQTT_IP                    # (e.g. 192.168.178.10)
+MQTT_PORT = YOUR_MQTT_PORT                  # (for example 9001 for websocket)
+TEMP_TOPIC = YOUR_TEMPERATURE_TOPIC         # (e.g. esp32/bme280/temperature)
+HUMI_TOPIC = YOUR_HUMIDITY_TOPIC            # (e.g. esp32/bme280/humidity)

@@ -1,0 +1,11 @@
+# GUI
+tk  # Tkinter (normalerweise schon in Python enthalten, optional)
+
+# Bilder & Icons
+Pillow==10.1.0
+
+# HTTP Requests für Wetterdaten
+requests==2.32.0
+
+# MQTT Client
+paho-mqtt==1.6.1

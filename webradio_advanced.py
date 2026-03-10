@@ -1,7 +1,7 @@
 # region imports
 import tkinter as tk
 import tkinter.ttk as ttk
-import tkinter.font as tkFont
+import paho.mqtt.client as mqtt
 import subprocess
 import sys
 import datetime
@@ -10,12 +10,12 @@ import os
 import json
 import socket
 import requests
-import io
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+import threading
+from PIL import Image, ImageTk
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-# endregion
+# endregion imports
 
 # region Settings
 
@@ -59,6 +59,16 @@ load_dotenv(dotenv_path=env_path)
 
 # API-Key aus Umgebungsvariable
 WEATHER_API_KEY = os.getenv("OWM_KEY")
+WEATHER_LAT = os.getenv("WEATHER_LAT")
+WEATHER_LON = os.getenv("WEATHER_LON")
+WEATHER_EXCL = os.getenv("WEATHER_EXCL")
+
+# MQTT Daten aus Umgebungsvariable
+MQTT_HOST = os.getenv("MQTT_HOST")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+MQTT_TIMEOUT = 300  # Sekunden, nach denen Werte als veraltet gelten
+TEMP_TOPIC = os.getenv("TEMP_TOPIC")
+HUMI_TOPIC = os.getenv("HUMI_TOPIC")
 
 # ----- Variablen -----
 player_process = None
@@ -71,9 +81,6 @@ current_station_name = ""
 active_control = None
 muted = False
 last_volume_before_mute = current_volume
-WEATHER_LAT = "54.80797555"
-WEATHER_LON = "9.52438474"
-WEATHER_EXCL = "minutely,hourly,daily,alerts"
 
 # Korrektur der deutschen Wetterbeschreibungen
 description_map = {
@@ -88,7 +95,7 @@ description_map = {
 }
 
 load_dotenv()
-# endregion
+# endregion Settings
 
 
 # region MPV-Player
@@ -120,7 +127,7 @@ class MPV:
         volume_var.set(int(vol))  # GUI-Zahl aktualisieren
 
 mpv = MPV(mpv_socket_path, lambda: player_process)
-# endregion
+# endregion MPV-Player
 
 
 # region Funktionen
@@ -140,7 +147,6 @@ def update_datetime():
     
     # Text für Anzeige zusammenstellen
     datetime_text = f"📅 {wochentag_de}, {jetzt.day:02d}.{jetzt.month:02d}.{jetzt.year}  🕒 {jetzt.hour:02d}:{jetzt.minute:02d} Uhr"
-    #⏰
 
     # Variable aktualisieren
     datetime_var.set(datetime_text)
@@ -175,6 +181,7 @@ def update_weather():
         # Temperatur, Beschreibung, Icon
         temp = round(data["current"]["temp"])
         desc = data["current"]["weather"][0]["description"].strip()
+        
         # Beschreibung korrigieren
         desc = description_map.get(desc.lower(), desc)
         icon_code = data["current"]["weather"][0]["icon"]
@@ -191,9 +198,11 @@ def update_weather():
         # Wind
         wind_deg = data["current"]["wind_deg"]
         wind_speed = data["current"]["wind_speed"]
+        
         # Windböen (falls vorhanden)
         gust_speed = data["current"].get("wind_gust", wind_speed)
         gust_bft = ms_to_bft(gust_speed)
+        
         # Beaufort berechnen
         if wind_speed < 0.3: bft = 0
         elif wind_speed < 1.6: bft = 1
@@ -262,7 +271,7 @@ def update_weather():
         # Canvas Breite ändern
         weather_canvas.config(width=langloch_width)
 
-        # ✅ Hintergrund GEOMETRISCH korrekt verschieben
+        # Hintergrund GEOMETRISCH korrekt verschieben
         weather_canvas.coords(weather_bg_rect,
             radius, 0,
             langloch_width - radius, langloch_height
@@ -287,12 +296,26 @@ def update_weather():
     except Exception as e:
         weather_temp_var.set("--°C")
         weather_desc_var.set("Wetterdaten Fehler")
-        # weather_wind_var.set("")
-        # weather_details_var.set("")
         print("Weather update error:", e)
 
     # alle 10 Minuten wiederholen
     root.after(600000, update_weather)  # 600000 = alle 10 Minuten
+
+def check_timeout():
+    """Überprüft, ob die Sensorwerte zu alt sind und färbt die LEDs ggf. grau."""
+    now = time.time()
+    
+    # Temperatur
+    # Wert zu alt → LED grau, aber Variablen bleiben unverändert
+    if now - last_temp_update > MQTT_TIMEOUT:
+        temp_led.itemconfig(temp_led_circle, fill="#555555")
+    
+    # Luftfeuchtigkeit
+    if now - last_hum_update > MQTT_TIMEOUT:
+        hum_led.itemconfig(hum_led_circle, fill="#555555")
+    
+    # Alle 1 Sekunde erneut prüfen
+    root.after(1000, check_timeout)
 
 def play_station(name, url):
     global player_process, last_station_name, current_station_name, is_playing
@@ -301,7 +324,6 @@ def play_station(name, url):
     last_station_name = name
     current_station_name = name
     is_playing = True
-    # stop_station()
     
     # Klinkenausgang aktivieren
     subprocess.call([
@@ -334,9 +356,9 @@ def play_station(name, url):
 def highlight_active_station(active_name):
     for name, btn in buttons.items():
         if name == active_name:
-            btn.config(highlightbackground="#22aa22", highlightthickness=5)  # #22aa22=grün #FFC200=gelb
+            btn.config(highlightbackground="#22aa22", highlightthickness=5)
         else:
-            btn.config(highlightbackground="#222", highlightthickness=1)       # neutral
+            btn.config(highlightbackground="#222", highlightthickness=1)
 
 def update_now_playing():
     """Liest den aktuellen ICY-Titel aus mpv und zeigt den Sendernamen, falls kein sinnvoller Titel verfügbar ist."""
@@ -406,16 +428,18 @@ def play_last_station():
     if last_station_name in stations_list:
         idx = stations_list.index(last_station_name)
 
-        # Ziel: aktiver Sender möglichst mittig (Position 2 oder 3)
-        # Position innerhalb der sichtbaren Sender: pos = 1 (Index 0=erste Position)
-        middle_pos = VISIBLE_STATIONS // 2  # z.B. 4//2 = 2 → Index 2 = Position 3
-        station_start_index = idx - middle_pos
+        # Ziel: aktiver Sender an Position 2 (Index 1), wenn möglich
+        if 1 <= idx <= len(stations_list) - 2:  # nicht erster oder letzter Sender
+            station_start_index = idx - 1
+        else:
+            # Sender am Anfang oder Ende → normale Startposition
+            station_start_index = max(0, min(idx, len(stations_list) - VISIBLE_STATIONS))
 
-        # Grenzen überprüfen, nicht unter 0 und nicht über das Maximum
-        if station_start_index < 0:
-            station_start_index = 0
+        # Grenze nach rechts prüfen, damit immer VISIBLE_STATIONS angezeigt werden
         if station_start_index + VISIBLE_STATIONS > len(stations_list):
             station_start_index = len(stations_list) - VISIBLE_STATIONS
+            if station_start_index < 0:
+                station_start_index = 0    
 
     update_station_buttons()
 
@@ -540,7 +564,7 @@ def update_control_highlight():
     # Mute
     if muted:
         control_canvas.itemconfig(mute_circle, fill=active_red)
-# endregion
+# endregion Funktionen
 
 
 # region GUI & Header
@@ -598,6 +622,8 @@ volume_up_icon = load_icon("volume_up.png", (32, 32))
 mute_icon = load_icon("mute.png", (32, 32))
 pressure_icon_img = load_icon("pressure.png", size=(20, 20))
 humidity_icon_img = load_icon("humidity.png", size=(20, 20))
+thermo_icon = load_icon("thermometer.png", (20,20))
+humidity_icon = load_icon("humidity.png", (20,20))
 wind_rose_base_img = Image.open(os.path.join(BASE_DIR, "img", "wind_rose.png")).convert("RGBA")
 wind_rose_base_img = wind_rose_base_img.resize((20,20), Image.LANCZOS)
 wind_rose_photo = ImageTk.PhotoImage(wind_rose_base_img)
@@ -645,17 +671,21 @@ title_label.pack(side="left", padx=10)
 
 # Variable für Datum/Uhrzeit
 datetime_var = tk.StringVar()
-datetime_var.set("")  # wird gleich aktualisiert
+datetime_var.set("")
 
 # Label für Datum/Uhrzeit (oben rechts)
 datetime_label = tk.Label(header, textvariable=datetime_var,
-                          font=("Arial", 12),  # normale Schrift für Datum/Uhrzeit
+                          font=("Arial", 12),
                           bg="#222222", fg="#bbbbbb")
 datetime_label.pack(side="right", padx=10)
-# endregion
+# endregion GUI & Header
 
 
-# region Wetter
+# region Wetter + Raumklima
+
+# Gesamtframe für beide Langlöcher
+dashboard_frame = tk.Frame(root, bg="#222222")
+dashboard_frame.pack(anchor="center", pady=15)
 
 # ----- Wetteranzeige als "Langloch" -----
 langloch_height = 80
@@ -663,17 +693,29 @@ radius = langloch_height // 2
 
 extra_width = 20
 padding = 30
+initial_width = 400
 
-initial_width = 400  # bewusst etwas größer wählen
+weather_container = tk.Frame(dashboard_frame, bg="#222222")
+weather_container.pack(side="left", padx=(0,10))
 
 weather_canvas = tk.Canvas(
-    root,
+    weather_container,
     width=initial_width,
     height=langloch_height,
     bg="#222222",
     highlightthickness=0
 )
-weather_canvas.pack(pady=15)
+weather_canvas.pack()
+
+# Label für Wetter-Anzeige
+weather_label = tk.Label(
+    weather_container,
+    text="OWM Wetter aktuell",
+    bg="#222222",
+    fg="#B2DAF3",
+    font=("Arial",9)
+)
+weather_label.pack(pady=(1,0))
 
 # Langloch-Hintergrund speichern
 weather_bg_rect = weather_canvas.create_rectangle(
@@ -699,7 +741,6 @@ weather_bg_right = weather_canvas.create_oval(
 
 # Innerer Frame
 weather_inner = tk.Frame(weather_canvas, bg="#333333")
-
 weather_window = weather_canvas.create_window(
     initial_width // 2,
     langloch_height // 2,
@@ -772,14 +813,175 @@ humidity_label_icon.pack(side="left")
 humidity_label_text = tk.Label(weather_details_frame, text="0%",
                                font=("Arial", 12), bg="#333333", fg="#bbbbbb")
 humidity_label_text.pack(side="left", padx=(3,0))
-# endregion
+
+# ----- Raumklima-Langloch -----
+raumklima_width = 220
+
+raumklima_container = tk.Frame(dashboard_frame, bg="#222222")
+raumklima_container.pack(side="left")
+
+raumklima_canvas = tk.Canvas(
+    raumklima_container,
+    width=raumklima_width,
+    height=langloch_height,
+    bg="#222222",
+    highlightthickness=0
+)
+raumklima_canvas.pack()
+
+# Label für Raumklima-Anzeige
+raumklima_label = tk.Label(
+    raumklima_container,
+    text="Raumklima",
+    bg="#222222",
+    fg="#B2DAF3",
+    font=("Arial",9)
+)
+raumklima_label.pack(pady=(1,0))
+
+# Hintergrund
+raumklima_bg_rect = raumklima_canvas.create_rectangle(
+    radius, 0,
+    raumklima_width - radius, langloch_height,
+    fill="#333333",
+    outline=""
+)
+raumklima_bg_left = raumklima_canvas.create_oval(
+    0, 0,
+    radius * 2, langloch_height,
+    fill="#333333",
+    outline=""
+)
+raumklima_bg_right = raumklima_canvas.create_oval(
+    raumklima_width - radius * 2, 0,
+    raumklima_width, langloch_height,
+    fill="#333333",
+    outline=""
+)
+
+# Innerer Frame für Inhalt
+raumklima_inner = tk.Frame(raumklima_canvas, bg="#333333", width=180)
+raumklima_window = raumklima_canvas.create_window(
+    raumklima_width // 2,
+    langloch_height // 2,
+    window=raumklima_inner,
+    anchor="center"
+)
+
+# ---- Raumklima Anzeige ----
+
+raumklima_frame = tk.Frame(raumklima_inner, bg="#333333")
+raumklima_frame.pack(padx=10)
+
+# -------- Temperatur --------
+
+temp_row = tk.Frame(raumklima_frame, bg="#333333")
+temp_row.pack(anchor="w", pady=2)
+
+temp_icon_label = tk.Label(temp_row, image=thermo_icon, bg="#333333")
+temp_icon_label.pack(side="left", padx=(15,0))
+
+room_temp_var = tk.StringVar(value="--.-- °C")
+
+room_temp_label = tk.Label(
+    temp_row,
+    textvariable=room_temp_var,
+    font=("Arial", 14, "bold"),
+    bg="#333333",
+    fg="#ffffff",
+    width=10,
+    anchor="w"
+)
+
+temp_led = tk.Canvas(
+    temp_row,
+    width=18,
+    height=18,
+    bg="#333333",
+    highlightthickness=0
+)
+temp_led.pack(side="left", padx=(4,8))
+room_temp_label.pack(side="left")
+
+# Glow
+temp_led_glow = temp_led.create_oval(
+    0,0,18,18,
+    fill="#444444",
+    outline=""
+)
+
+# LED
+temp_led_circle = temp_led.create_oval(
+    3,3,15,15,
+    fill="blue",
+    outline=""
+)
+
+# Reflex
+temp_led_reflex = temp_led.create_oval(
+    6,5,9,8,
+    fill="#ffffff",
+    outline=""
+)
+
+# -------- Luftfeuchtigkeit --------
+
+hum_row = tk.Frame(raumklima_frame, bg="#333333")
+hum_row.pack(anchor="w", pady=2)
+
+hum_icon_label = tk.Label(hum_row, image=humidity_icon, bg="#333333")
+hum_icon_label.pack(side="left", padx=(15,0))
+
+room_hum_var = tk.StringVar(value="--.-- %")
+
+room_hum_label = tk.Label(
+    hum_row,
+    textvariable=room_hum_var,
+    font=("Arial", 14),
+    bg="#333333",
+    fg="#bbbbbb",
+    width=10,
+    anchor="w"
+)
+
+hum_led = tk.Canvas(
+    hum_row,
+    width=18,
+    height=18,
+    bg="#333333",
+    highlightthickness=0
+)
+hum_led.pack(side="left", padx=(4,8))
+room_hum_label.pack(side="left")
+
+# Glow
+hum_led_glow = hum_led.create_oval(
+    0,0,18,18,
+    fill="#444444",
+    outline=""
+)
+
+# LED
+hum_led_circle = hum_led.create_oval(
+    3,3,15,15,
+    fill="blue",
+    outline=""
+)
+
+# Reflex
+hum_led_reflex = hum_led.create_oval(
+    6,5,9,8,
+    fill="#ffffff",
+    outline=""
+)
+# endregion Wetter + Raumklima
 
 
 # region Senderauswahl
 
 # Sender-Buttons + Scroll-Pfeile
 button_frame = tk.Frame(root, bg="#222")
-button_frame.pack(pady=5)
+button_frame.pack(pady=(2,0))
 
 button_frame.grid_columnconfigure(0, weight=0)
 button_frame.grid_columnconfigure(1, weight=1)
@@ -823,8 +1025,7 @@ for name in stations_list:
         button_frame,
         image=photo,
         command=lambda n=name: play_station(n, stations[n]["url"]),
-        # bg="#222",
-        bg="#c4c4c4", #e3e3e3
+        bg="#c4c4c4",
         activebackground="#808080",
         bd=0
     )
@@ -840,8 +1041,8 @@ left_arrow_btn = tk.Button(
     image=left_arrow_img,
     bg="#222",
     bd=0,
-    highlightthickness=1,          # Rahmendicke
-    highlightbackground="#444",    # unauffälliges Grau
+    highlightthickness=1,
+    highlightbackground="#444",
     activebackground="#222",
     command=scroll_left)
 
@@ -849,8 +1050,8 @@ right_arrow_btn = tk.Button(
     button_frame,image=right_arrow_img,
     bg="#222",
     bd=0,
-    highlightthickness=1,          # Rahmendicke
-    highlightbackground="#444",    # unauffälliges Grau
+    highlightthickness=1,
+    highlightbackground="#444",
     activebackground="#222",
     command=scroll_right)
 
@@ -894,8 +1095,8 @@ now_playing_label = tk.Label(
     bg="#222",
     fg="#bbbbbb"
 )
-now_playing_label.pack(pady=5)
-# endregion
+now_playing_label.pack(pady=(5,0))
+# endregion Senderauswahl
 
 
 # region Playerfunktionalität
@@ -957,7 +1158,7 @@ volume_slot_x = 550
 volume_slot_y = BUTTON_Y
 volume_slot_width = 140
 volume_slot_height = 24
-bar_radius = volume_slot_height / 2  # volle Höhe → Kapsel
+bar_radius = volume_slot_height / 2
 
 # Hintergrund Langloch
 control_canvas.create_oval(
@@ -995,32 +1196,16 @@ volume_bar = ttk.Progressbar(
 control_canvas.create_window(volume_slot_x, volume_slot_y, window=volume_bar)
 update_volume_style()
 
-# Label für die Lautstärke direkt unterhalb der Bar
-label_width = 30
-label_height = 20
-label_radius = 6
-label_padding_top = 2
-
-# Hintergrund Kapsel
-x0 = volume_slot_x - label_width/2
-y0 = volume_slot_y + volume_slot_height/2 + label_padding_top
-x1 = volume_slot_x + label_width/2
-y1 = y0 + label_height
-
-control_canvas.create_oval(x0, y0, x0 + label_radius*2, y1, fill="#3a3a3a", outline="")
-control_canvas.create_oval(x1 - label_radius*2, y0, x1, y1, fill="#3a3a3a", outline="")
-control_canvas.create_rectangle(x0 + label_radius, y0, x1 - label_radius, y1, fill="#3a3a3a", outline="")
-
 volume_label = tk.Label(
-    control_canvas,  # jetzt im gleichen Canvas wie die Bar
+    control_canvas,
     textvariable=volume_var,
-    font=("Arial", 11),
-    bg="#3a3a3a",
+    font=("Arial", 9),
+    bg="#222222",
     fg="white",
 )
 control_canvas.create_window(
     volume_slot_x, 
-    y0 + label_height/2,
+    volume_slot_y + volume_slot_height/2 + 9,
     window=volume_label
 )
 
@@ -1040,7 +1225,67 @@ if last:
     update_control_highlight()    # Play-Button grün setzen
 else:
     update_control_highlight()    # Stop grün, falls keine Station
-# endregion
+# endregion Playerfunktionalität
+
+
+# region MQTT-Abruf
+
+# Globale Variablen für die letzten Update-Zeitpunkte
+last_temp_update = 0
+last_hum_update = 0
+
+def update_led(canvas, item_id, value, value_type):
+    """Setzt die LED-Farbe abhängig vom Wert"""
+    if value_type == "temp":
+        # <20 blau | <=24 grün | sonst rot
+        if value < 20:
+            color = "#008BFF"
+        elif value <= 24:
+            color = "#22aa22"
+        else:
+            color = "#cc3333"
+    elif value_type == "hum":
+        # <40 rot | <=60 grün | sonst blau
+        if value < 40:
+            color = "#cc3333"
+        elif value <= 60:
+            color = "#22aa22"
+        else:
+            color = "#008BFF"
+    canvas.itemconfig(item_id, fill=color)
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("MQTT verbunden")
+        client.subscribe(TEMP_TOPIC)
+        client.subscribe(HUMI_TOPIC)
+    else:
+        print("MQTT-Verbindungsfehler:", rc)
+
+def on_message(client, userdata, msg):
+    global last_temp_update, last_hum_update
+    try:
+        value = float(msg.payload.decode())
+        if msg.topic == TEMP_TOPIC:
+            room_temp_var.set(f"{value:.2f} °C")
+            update_led(temp_led, temp_led_circle, value, "temp")
+            last_temp_update = time.time()
+        elif msg.topic == HUMI_TOPIC:
+            room_hum_var.set(f"{value:.2f} %")
+            update_led(hum_led, hum_led_circle, value, "hum")
+            last_hum_update = time.time()
+    except Exception as e:
+        print("MQTT Message Fehler:", e)
+
+def mqtt_thread():
+    client = mqtt.Client(transport="websockets")
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(MQTT_HOST, MQTT_PORT, 60)
+    client.loop_forever()
+
+threading.Thread(target=mqtt_thread, daemon=True).start()
+# endregion MQTT-Abruf
 
 
 # region loop
@@ -1049,6 +1294,7 @@ else:
 update_datetime()
 update_weather()
 update_now_playing()
+check_timeout()
 
 root.mainloop()
-# endregion
+# endregion loop
