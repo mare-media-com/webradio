@@ -8,9 +8,11 @@ Ggf. müssen dann allerdings noch Anpassungen vorgenommen werden.
 
 ## Features
 
-- Anzeige von aktuellen Wetterdaten (OpenWeatherMap)  
+- Anzeige von aktuellen Wetterdaten (OpenWeatherMap):
+  - Wettersymbol, Temperatur, Windrichtung, Windstärke, Windwarnung, AQI-Index (Air quality) 
 - Raumklimaanzeige mit Temperatur & Luftfeuchtigkeit  
-- Farbige LEDs mit realistischem Glow-Effekt  
+- Farbige LEDs mit realistischem Glow-Effekt
+- Tooltips  
 - Senderliste mit Pfeilnavigation  
 - Player-Steuerung: Play, Stop, Exit, Lautstärke, Mute, Lautstärke-Balken  
 - Vollständig in **Tkinter** umgesetzt  
@@ -101,6 +103,7 @@ webradio/
 │   └── ... weitere Symbole, Steuerungs- und Sender-Icons
 │   └── weather_icons/
 │   	└── 01d.png
+│   	└── aqi1.png
 │   	└── orkan.png
 │   	└── ... weitere Wetter-Icons
 ├── README.md

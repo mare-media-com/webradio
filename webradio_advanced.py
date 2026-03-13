@@ -53,6 +53,48 @@ stations = {
     }
 }
 
+# Integration Tooltips
+class ToolTip:
+    def __init__(self, widget):
+        self.widget = widget
+        self.tipwindow = None
+        self.text = ""
+
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, event=None):
+        if self.tipwindow or not self.text:
+            return
+
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(
+            tw,
+            text=self.text,
+            background="#ffffe0",
+            relief="solid",
+            borderwidth=1,
+            padx=6,
+            pady=3,
+            font=("Arial", 10),
+            wraplength=300  # Breite in Pixeln, danach wird umgebrochen
+        )
+        label.pack()
+
+    def hide(self, event=None):
+        if self.tipwindow:
+            self.tipwindow.destroy()
+            self.tipwindow = None
+
+    def update_text(self, text):
+        self.text = text
+
 # Absoluter Pfad zur .env-Datei relativ zum Skript
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -198,25 +240,26 @@ def update_weather():
         # Wind
         wind_deg = data["current"]["wind_deg"]
         wind_speed = data["current"]["wind_speed"]
+        wind_bft = ms_to_bft(wind_speed)
         
         # Windböen (falls vorhanden)
         gust_speed = data["current"].get("wind_gust", wind_speed)
         gust_bft = ms_to_bft(gust_speed)
         
-        # Beaufort berechnen
-        if wind_speed < 0.3: bft = 0
-        elif wind_speed < 1.6: bft = 1
-        elif wind_speed < 3.4: bft = 2
-        elif wind_speed < 5.5: bft = 3
-        elif wind_speed < 8.0: bft = 4
-        elif wind_speed < 10.8: bft = 5
-        elif wind_speed < 13.9: bft = 6
-        elif wind_speed < 17.2: bft = 7
-        elif wind_speed < 20.8: bft = 8
-        elif wind_speed < 24.5: bft = 9
-        elif wind_speed < 28.5: bft = 10
-        elif wind_speed < 32.7: bft = 11
-        else: bft = 12
+        # # Beaufort berechnen
+        # if wind_speed < 0.3: bft = 0
+        # elif wind_speed < 1.6: bft = 1
+        # elif wind_speed < 3.4: bft = 2
+        # elif wind_speed < 5.5: bft = 3
+        # elif wind_speed < 8.0: bft = 4
+        # elif wind_speed < 10.8: bft = 5
+        # elif wind_speed < 13.9: bft = 6
+        # elif wind_speed < 17.2: bft = 7
+        # elif wind_speed < 20.8: bft = 8
+        # elif wind_speed < 24.5: bft = 9
+        # elif wind_speed < 28.5: bft = 10
+        # elif wind_speed < 32.7: bft = 11
+        # else: bft = 12
 
         # Druck & Luftfeuchtigkeit
         pressure = data["current"]["pressure"]
@@ -234,12 +277,12 @@ def update_weather():
         weather_wind_label.image = wind_photo  # Referenz halten
 
         # Beaufort-Wert daneben aktualisieren
-        bft_label.config(text=f"{bft} bft")
+        bft_label.config(text=f"{wind_bft} bft")
 
         # --- Windwarnsymbol setzen ---
         if 5 <= gust_bft <= 7:
-            wind_warning_label.config(image=wind_icon_small)
-            wind_warning_label.image = wind_icon_small
+            wind_warning_label.config(image=wind_icon)
+            wind_warning_label.image = wind_icon
 
         elif 8 <= gust_bft <= 9:
             wind_warning_label.config(image=sturm_icon)
@@ -293,13 +336,80 @@ def update_weather():
             langloch_height // 2
         )
 
+        # Windgeschwindigkeit Tooltip
+        update_wind_tooltip(wind_bft, wind_speed_tooltip)
+
+        # Böen Tooltip
+        update_wind_tooltip(gust_bft, wind_gust_tooltip)
+
     except Exception as e:
         weather_temp_var.set("--°C")
         weather_desc_var.set("Wetterdaten Fehler")
         print("Weather update error:", e)
 
+    # AQI-Daten von OpenWeatherMap abrufen
+    try:
+
+        url_aqi = (
+            f"https://api.openweathermap.org/data/2.5/air_pollution"
+            f"?lat={WEATHER_LAT}"
+            f"&lon={WEATHER_LON}"
+            f"&appid={WEATHER_API_KEY}"
+        )
+
+        response_aqi = requests.get(url_aqi, timeout=10)
+        data_aqi = response_aqi.json()
+
+        aqi_value = data_aqi["list"][0]["main"]["aqi"]
+
+        update_aqi_icon(aqi_value)
+
+    except Exception as e:
+        print("Fehler beim Abrufen des AQI:", e)
+
     # alle 10 Minuten wiederholen
     root.after(600000, update_weather)  # 600000 = alle 10 Minuten
+
+def update_aqi_icon(aqi_value):
+
+    key = f"aqi{aqi_value}"
+
+    if key in weather_icon_images:
+        aqi_label.config(image=weather_icon_images[key])
+        aqi_label.image = weather_icon_images[key]
+
+    aqi_text = {
+        1: "Gute Luftqualität",
+        2: "Moderate/Mäßige Luftqualität",
+        3: "Ungesunde Luftqualität für sensible Gruppen",
+        4: "Ungesunde Luftqualität",
+        5: "Sehr ungesunde Luftqualität",
+        6: "Gefährliche Luftqualität"
+    }
+
+    if aqi_value in aqi_text:
+        aqi_tooltip.update_text(f"AQI {aqi_value} – {aqi_text[aqi_value]}")    
+
+def update_wind_tooltip(value, tooltip):
+    wind_tips = {
+    0: "Windstill",
+    1: "Leichter Wind",
+    2: "Leichter bis mäßiger Wind",
+    3: "Mäßiger Wind, sichern von leichten Gegenständen",
+    4: "Frischer Wind, Vorsicht bei losem Material",
+    5: "Starker Wind, draußen aufpassen, lose Gegenstände sichern",
+    6: "Stürmische Böen, riskante Aktivitäten vermeiden",
+    7: "Stürmisch, erhöhte Vorsicht draußen",
+    8: "Stürmische Böen, Aufenthalt draußen riskant",
+    9: "Schwerer Sturm, gefährlich, zu Hause bleiben",
+    10: "Sehr schwerer Sturm, Gefahr für Menschen und Gebäude",
+    11: "Orkanartige Böen, höchste Vorsicht",
+    12: "Orkan, lebensgefährlich draußen"
+}
+    # Begrenzung auf gültige Bft-Werte
+    value = max(0, min(12, value))
+    tip_text = f"{value} Bft – {wind_tips[value]}"
+    tooltip.update_text(tip_text)
 
 def check_timeout():
     """Überprüft, ob die Sensorwerte zu alt sind und färbt die LEDs ggf. grau."""
@@ -627,7 +737,7 @@ humidity_icon = load_icon("humidity.png", (20,20))
 wind_rose_base_img = Image.open(os.path.join(BASE_DIR, "img", "wind_rose.png")).convert("RGBA")
 wind_rose_base_img = wind_rose_base_img.resize((20,20), Image.LANCZOS)
 wind_rose_photo = ImageTk.PhotoImage(wind_rose_base_img)
-wind_icon_small = ImageTk.PhotoImage(
+wind_icon = ImageTk.PhotoImage(
     Image.open(os.path.join(BASE_DIR, "img/weather_icons/wind.png")).resize((32, 32))
 )
 
@@ -659,7 +769,12 @@ for filename in os.listdir(icon_folder):
         code = filename.replace(".png", "")
         path = os.path.join(icon_folder, filename)
 
-        img = Image.open(path).resize((icon_size, icon_size), Image.LANCZOS)
+        if filename.startswith("aqi"):
+            size = 30
+        else:
+            size = icon_size
+
+        img = Image.open(path).resize((size, size), Image.LANCZOS)
         weather_icon_images[code] = ImageTk.PhotoImage(img)
 
 # Header
@@ -686,6 +801,11 @@ datetime_label.pack(side="right", padx=10)
 # Gesamtframe für beide Langlöcher
 dashboard_frame = tk.Frame(root, bg="#222222")
 dashboard_frame.pack(anchor="center", pady=15)
+
+
+################################
+#            Wetter            #
+################################
 
 # ----- Wetteranzeige als "Langloch" -----
 langloch_height = 80
@@ -775,10 +895,20 @@ weather_wind_label.pack(side="left", padx=(15,0))
 bft_label = tk.Label(top_row_frame, text="0 bft",  # Platzhalter
                      font=("Arial", 24, "bold"), bg="#333333", fg="white")
 bft_label.pack(side="left", padx=(5,0))
+wind_speed_tooltip = ToolTip(bft_label)
 
 # Wind-Warnsymbol (startet leer)
 wind_warning_label = tk.Label(top_row_frame, bg="#333333")
 wind_warning_label.pack(side="left", padx=(10,0))
+
+wind_gust_tooltip = ToolTip(wind_warning_label)
+
+# AQI-Symbol (startet mit Default-Symbol)
+aqi_label = tk.Label(top_row_frame, image=weather_icon_images["aqi1"], bg="#333333")
+aqi_label.image = weather_icon_images["aqi1"]
+aqi_label.pack(side="left", padx=(10,0))
+
+aqi_tooltip = ToolTip(aqi_label)
 
 # Untere Zeile
 bottom_row_frame = tk.Frame(weather_text_frame, bg="#333333")
@@ -813,6 +943,11 @@ humidity_label_icon.pack(side="left")
 humidity_label_text = tk.Label(weather_details_frame, text="0%",
                                font=("Arial", 12), bg="#333333", fg="#bbbbbb")
 humidity_label_text.pack(side="left", padx=(3,0))
+
+
+################################
+#          Raumklima           #
+################################
 
 # ----- Raumklima-Langloch -----
 raumklima_width = 220
@@ -1266,14 +1401,21 @@ def on_message(client, userdata, msg):
     global last_temp_update, last_hum_update
     try:
         value = float(msg.payload.decode())
-        if msg.topic == TEMP_TOPIC:
-            room_temp_var.set(f"{value:.2f} °C")
-            update_led(temp_led, temp_led_circle, value, "temp")
-            last_temp_update = time.time()
-        elif msg.topic == HUMI_TOPIC:
-            room_hum_var.set(f"{value:.2f} %")
-            update_led(hum_led, hum_led_circle, value, "hum")
-            last_hum_update = time.time()
+
+        def gui_update():
+            global last_temp_update, last_hum_update
+            if msg.topic == TEMP_TOPIC:
+                room_temp_var.set(f"{value:.2f} °C")
+                update_led(temp_led, temp_led_circle, value, "temp")
+                last_temp_update = time.time()
+            elif msg.topic == HUMI_TOPIC:
+                room_hum_var.set(f"{value:.2f} %")
+                update_led(hum_led, hum_led_circle, value, "hum")
+                last_hum_update = time.time()
+
+        # GUI-Update über root.after() in Hauptthread einreihen
+        root.after(0, gui_update)    
+
     except Exception as e:
         print("MQTT Message Fehler:", e)
 
@@ -1284,7 +1426,8 @@ def mqtt_thread():
     client.connect(MQTT_HOST, MQTT_PORT, 60)
     client.loop_forever()
 
-threading.Thread(target=mqtt_thread, daemon=True).start()
+# threading.Thread(target=mqtt_thread, daemon=True).start()
+root.after(1000, lambda: threading.Thread(target=mqtt_thread, daemon=True).start())
 # endregion MQTT-Abruf
 
 
